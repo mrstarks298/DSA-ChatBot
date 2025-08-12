@@ -1,0 +1,13 @@
+Flask
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+numpy
+pandas
+scikit-learn
+weasyprint
+python-dotenv
+supabase
+requests
+sentence-transformers
+groq
