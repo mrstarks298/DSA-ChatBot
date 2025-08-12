@@ -1,14 +1,16 @@
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from ..extensions import model, logger
+from .embeddings import get_embedding_from_api  # import the API embedding function
+from ..extensions import logger
 
 def best_text_for_query(query: str, text_df):
     if text_df.empty:
         return {"error": "No text content available"}
     try:
-        qemb = model.encode(query)
-        if len(qemb) != 384:
-            return {"error": "Query embedding dimension mismatch"}
+        qemb = get_embedding_from_api(query)
+        if qemb is None or len(qemb) != 384:
+            return {"error": "Query embedding generation failed or dimension mismatch"}
+
         embs = np.vstack(text_df["embedding"].tolist())
         sims = cosine_similarity([qemb], embs)
         idx = sims.argmax()
@@ -25,8 +27,8 @@ def top_qa_for_query(query: str, qa_df, k: int = 5):
     if qa_df.empty:
         return []
     try:
-        qemb = model.encode(query)
-        if len(qemb) != 384:
+        qemb = get_embedding_from_api(query)
+        if qemb is None or len(qemb) != 384:
             return []
         embs = np.vstack(qa_df["embedding"].tolist())
         sims = cosine_similarity([qemb], embs)[0]
