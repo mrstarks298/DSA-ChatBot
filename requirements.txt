@@ -11,3 +11,5 @@ supabase
 requests
 sentence-transformers
 groq
+gunicorn
+
