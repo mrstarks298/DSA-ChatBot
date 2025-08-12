@@ -229,7 +229,7 @@
     scrollToBottom();
   }
 
-  function addBotResponse(data) {
+ function addBotResponse(data) {
     if (!chatContent) return;
     const id = `message-${state.currentThreadId}-${Date.now()}`;
     const div = document.createElement('div');
@@ -249,21 +249,38 @@
     }
     if (data.summary) {
       html += `<div class="concept-explanation">${escapeHtml(data.summary)}</div>`;
-    } else if (data.best_book?.content) {
-  // Don't truncate content for question generation
-  let c = data.best_book.content;
-  
-  // Simple markdown-like rendering for better display
-  c = c.replace(/\n/g, '<br>')                    // Line breaks
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  // Bold
-        .replace(/```python\n([\s\S]*?)\n```/g, '<pre><code>$1</code></pre>')  // Code blocks
-        .replace(/`([^`]+)`/g, '<code>$1</code>')  // Inline code
-        .replace(/^# (.*$)/gm, '<h2>$1</h2>')      // Headers
-        .replace(/^## (.*$)/gm, '<h3>$1</h3>')     // Subheaders
-        .replace(/^- (.*$)/gm, '<li>$1</li>');     // List items
-  
-  html += `<div class="concept-explanation">${c}</div>`;
-}
+    } 
+    
+    // FIXED: Properly display question content
+    if (data.best_book?.content) {
+      let c = data.best_book.content;
+      
+      // Enhanced markdown-like rendering for better display
+      c = c.replace(/\n/g, '<br>')                    
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  
+        .replace(/```python\n([\s\S]*?)\n```/g, '<pre><code class="language-python">$1</code></pre>')  
+        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')  // Generic code blocks
+        .replace(/`([^`]+)`/g, '<code>$1</code>')  
+        .replace(/^# (.*$)/gm, '<h2>$1</h2>')      
+        .replace(/^## (.*$)/gm, '<h3>$1</h3>')     
+        .replace(/^### (.*$)/gm, '<h4>$1</h4>')    
+        .replace(/^- (.*$)/gm, '<li>$1</li>')      
+        .replace(/^\* (.*$)/gm, '<li>$1</li>')     // Handle asterisk bullets too
+        .replace(/---/g, '<hr>')                   // Horizontal rules
+        .replace(/💡 \*\*Tips:\*\*/g, '<div class="tip-box">💡 <strong>Tips:</strong>')
+        .replace(/(\d+)\. /g, '<strong>$1.</strong> '); // Number lists
+
+      // Wrap consecutive <li> elements in <ul>
+      c = c.replace(/(<li>.*?<\/li>)(\s*<li>.*?<\/li>)*/g, '<ul>$&</ul>');
+      
+      // Close tip box if it was opened
+      if (c.includes('<div class="tip-box">')) {
+        c = c.replace(/(<div class="tip-box">.*?)(<br>|$)/g, '$1</div>$2');
+      }
+      
+      html += `<div class="concept-explanation">${c}</div>`;
+    }
+    
     if (data.best_book?.content && /complexity|time|space/i.test(data.best_book.content)) {
       html += `
         <div class="complexity-badges">
