@@ -13,7 +13,7 @@ class BaseConfig:
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
     GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
-    REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://127.0.0.1:50017/oauth2callback")
+    REDIRECT_URI = os.environ.get("REDIRECT_URI", "https://dsa-chatbot-3rll.onrender.com/oauth2callback")
 
     GROQ_CHAT_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
