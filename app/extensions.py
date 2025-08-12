@@ -1,7 +1,14 @@
+
+
+
+# Initialize immediately instead of waiting for init_extensions
+
 import logging
 import os
 from supabase import create_client, Client
-from sentence_transformers import SentenceTransformer
+from dotenv import load_dotenv
+
+load_dotenv()  # load .env variables
 
 logger = logging.getLogger("dsa-mentor")
 
@@ -13,6 +20,9 @@ key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRz
 # url = os.environ.get("SUPABASE_URL", url)
 # key = os.environ.get("SUPABASE_KEY", key)
 
+# url = os.getenv("SUPABASE_URL")
+# key = os.getenv("SUPABASE_KEY")
+
 print(f"DEBUG: Initializing Supabase with URL: {url}")
 print(f"DEBUG: Supabase key is set: {bool(key)}")
 
@@ -23,27 +33,17 @@ except Exception as e:
     print(f"ERROR: Failed to create Supabase client: {e}")
     supabase = None
 
-try:
-    model: SentenceTransformer = SentenceTransformer("all-MiniLM-L6-v2")
-    print("DEBUG: SentenceTransformer model loaded successfully")
-except Exception as e:
-    print(f"ERROR: Failed to load SentenceTransformer: {e}")
-    model = None
-
 def init_extensions(app):
     """Additional app-specific initialization"""
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO)
     logger.setLevel(logging.INFO)
 
-    # Enable OAuth over HTTP for dev if configured in app config
     if app.config.get("OAUTHLIB_INSECURE_TRANSPORT"):
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     
-    # Verify initialization worked
-    global supabase, model
+    global supabase
     print(f"DEBUG: init_extensions called - supabase is None: {supabase is None}")
-    print(f"DEBUG: init_extensions called - model is None: {model is None}")
     
     if supabase is None:
         logger.error("CRITICAL: Supabase client is still None after initialization!")
