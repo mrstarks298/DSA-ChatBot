@@ -7,7 +7,7 @@ DSA_TOPICS = {
     'array': ['array', 'arrays', 'list', 'arraylist'],
     'linked_list': ['linked list', 'linkedlist', 'node', 'pointer'],
     'stack': ['stack', 'lifo', 'push', 'pop'],
-    'queue': ['queue', 'fifo', 'enqueue', 'dequeue'],  # This should match "queue"!
+    'queue': ['queue', 'fifo', 'enqueue', 'dequeue'],
     'tree': ['tree', 'binary tree', 'bst', 'binary search tree', 'avl', 'heap'],
     'graph': ['graph', 'vertex', 'edge', 'adjacency', 'dijkstra', 'bfs', 'dfs'],
     'sorting': ['sort', 'sorting', 'bubble sort', 'merge sort', 'quick sort', 'heap sort'],
@@ -22,10 +22,7 @@ class QueryProcessor:
         if not query:
             return ""
         query = re.sub(r'\s+', ' ', query.strip())
-        # FIXED: Escape the dash or put it at the end of the character class
         normalized = re.sub(r'[^\w\s?!.+\-]', '', query.lower())
-        # Alternative fix: put dash at the end
-        # normalized = re.sub(r'[^\w\s?!.+-]', '', query.lower())
         
         typo = {
             r'\balgorithem\b': 'algorithm',
@@ -50,7 +47,7 @@ class QueryProcessor:
             'implementation_asked': False,
             'example_asked': False,
             'comparison_asked': False,
-            'question_generation_asked': False  # NEW: Added question generation detection
+            'question_generation_asked': False
         }
         for topic, kws in DSA_TOPICS.items():
             if any(k in normalized for k in kws):
@@ -63,8 +60,7 @@ class QueryProcessor:
             ctx['example_asked'] = True
         if any(w in normalized for w in ['vs', 'versus', 'compare', 'difference', 'better']):
             ctx['comparison_asked'] = True
-        # NEW: Detect question generation requests
-        if any(w in normalized for w in ['generate question', 'create question', 'ask question', 'practice question', 'quiz', 'test me', 'give me question']):
+        if any(w in normalized for w in ['generate question', 'create question', 'ask question', 'practice question', 'quiz', 'test me', 'give me question', 'generate problem', 'practice problem']):
             ctx['question_generation_asked'] = True
         return ctx
 
@@ -80,15 +76,15 @@ def classify_query_fallback(query: str) -> dict:
     if any(x in q for x in ['how are you', 'how r u', 'whats up', "what's up", "how's it going"]):
         return {"type": "casual_chat", "confidence": 0.8, "is_dsa": False, "reasoning": "fallback pattern"}
     
-    # NEW: Question generation patterns
-    if any(x in q for x in ['generate question', 'create question', 'practice question', 'quiz me', 'test me', 'give me question']):
+    # Question generation patterns (ENHANCED)
+    if any(x in q for x in ['generate question', 'create question', 'practice question', 'quiz me', 'test me', 'give me question', 'generate problem', 'practice problem', 'give me practice']):
         return {"type": "question_generation", "confidence": 0.9, "is_dsa": True, "reasoning": "question generation request"}
     
-    # FIXED: Better DSA detection using our DSA_TOPICS
+    # Better DSA detection using our DSA_TOPICS
     processor = QueryProcessor()
     ctx = processor.extract_dsa_context(q)
     
-    if ctx['topics']:  # If any DSA topics detected
+    if ctx['topics']:
         return {"type": "dsa_specific", "confidence": 0.9, "is_dsa": True, "reasoning": f"fallback detected: {ctx['topics']}"}
     
     # Specific DSA keywords that might not be in topics
@@ -122,11 +118,11 @@ Classify user queries into these categories:
 - "casual_chat": How are you, what's up  
 - "fun_chat": General friendly conversation
 - "dsa_specific": Questions about algorithms, data structures, coding, complexity
-- "question_generation": Requests to generate/create practice questions or quizzes
+- "question_generation": Requests to generate/create practice questions, problems, or quizzes
 - "vague_question": Unclear or very general questions
 
 For DSA topics like "queue", "stack", "tree", "sorting", "binary search" etc., always use "dsa_specific".
-For requests like "generate questions", "create quiz", "practice problems", use "question_generation".
+For requests like "generate questions", "create quiz", "practice problems", "give me problems", use "question_generation".
 
 Respond with ONLY valid JSON in this format:
 {"type": "category", "confidence": 0.8, "is_dsa": true/false, "reasoning": "explanation"}"""
@@ -144,13 +140,10 @@ Respond with ONLY valid JSON in this format:
         response_json = res.json()
         logger.debug(f"Groq API response structure: {type(response_json.get('choices'))}")
         
-        # FIXED: Handle both list and dict response formats
         choices = response_json.get("choices")
         if isinstance(choices, list) and len(choices) > 0:
-            # Standard format: choices is a list
             content = choices[0].get("message", {}).get("content", "").strip()
         elif isinstance(choices, dict):
-            # Alternative format: choices is a dict
             content = choices.get("message", {}).get("content", "").strip()
         else:
             raise ValueError(f"Unexpected choices format: {type(choices)}")
@@ -189,9 +182,8 @@ Respond with ONLY valid JSON in this format:
         logger.error(f"Groq classification error: {e}")
         return classify_query_fallback(user_query)
 
-# NEW: Question generation function using Groq API
 def generate_dsa_questions_with_groq(topic: str, difficulty: str = 'medium', count: int = 3) -> dict:
-    """Generate DSA questions with answers using Groq API instead of embeddings"""
+    """Generate DSA questions with answers using Groq API"""
     api_key = current_app.config.get("GROQ_API_KEY")
     if not api_key:
         logger.warning("No Groq API key for question generation")
@@ -213,25 +205,18 @@ def generate_dsa_questions_with_groq(topic: str, difficulty: str = 'medium', cou
     
     formatted_topic = topic_mapping.get(topic.lower(), topic)
     
-    system_prompt = f"""You are an expert DSA instructor creating practice questions. 
-Generate {count} {difficulty} level questions about {formatted_topic}.
+    # FIXED: More focused system prompt for better JSON response
+    system_prompt = f"""You are a DSA expert. Generate {count} {difficulty} level questions about {formatted_topic}.
 
-For each question, provide:
-1. Clear problem statement
-2. Input/output examples
-3. Detailed solution explanation
-4. Code implementation (Python preferred)
-5. Time/space complexity analysis
-
-Format as JSON:
+Respond with ONLY valid JSON in this exact format:
 {{
   "questions": [
     {{
       "id": 1,
-      "question": "Problem statement here",
-      "examples": ["Example 1: Input -> Output", "Example 2: Input -> Output"],
-      "solution_explanation": "Step by step explanation",
-      "code": "def solution():\\n    # Python implementation here",
+      "question": "Clear problem statement",
+      "examples": "Input: [1,2,3] Output: 6",
+      "solution": "Step by step explanation",
+      "code": "def solution(arr):\\n    return sum(arr)",
       "time_complexity": "O(n)",
       "space_complexity": "O(1)",
       "difficulty": "{difficulty}",
@@ -245,7 +230,7 @@ Format as JSON:
         "model": "llama3-70b-8192",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Generate {count} {difficulty} questions about {formatted_topic} with complete solutions"}
+            {"role": "user", "content": f"Generate {count} {difficulty} questions about {formatted_topic}. Return valid JSON only."}
         ],
         "temperature": 0.7,
         "max_tokens": 2000
@@ -275,83 +260,82 @@ Format as JSON:
             questions_data = json.loads(content)
             logger.info(f"Generated {len(questions_data.get('questions', []))} questions for {topic}")
             return questions_data
-        except json.JSONDecodeError:
-            # Fallback: create structured response from text
-            return _create_fallback_questions(content, topic, difficulty)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in question generation: {e}")
+            return _generate_fallback_questions(topic, difficulty, count)
             
     except Exception as e:
         logger.error(f"Question generation error: {e}")
         return _generate_fallback_questions(topic, difficulty, count)
 
-# NEW: Helper function for fallback questions
-def _create_fallback_questions(content: str, topic: str, difficulty: str) -> dict:
-    """Create structured questions from unstructured content"""
-    return {
-        "questions": [{
-            "id": 1,
-            "question": f"Practice {topic} problem ({difficulty} level)",
-            "examples": ["Check the detailed explanation below"],
-            "solution_explanation": content,
-            "code": "# Implementation details provided in explanation above",
-            "time_complexity": "Varies",
-            "space_complexity": "Varies", 
-            "difficulty": difficulty,
-            "topic": topic
-        }]
-    }
-
-# NEW: Helper function for basic fallback questions
 def _generate_fallback_questions(topic: str, difficulty: str, count: int) -> dict:
-    """Generate basic questions when API fails"""
+    """Generate basic questions when API fails - ENHANCED for better display"""
     basic_questions = {
         'array': {
             'question': 'Find the maximum element in an array',
-            'solution': 'Iterate through array keeping track of maximum value',
-            'complexity': 'O(n) time, O(1) space'
+            'examples': 'Input: [3, 7, 1, 9, 2] Output: 9',
+            'solution': 'Iterate through the array keeping track of the maximum value seen so far. Start with the first element as max, then compare each subsequent element.',
+            'code': 'def find_max(arr):\n    if not arr:\n        return None\n    max_val = arr[0]\n    for num in arr[1:]:\n        if num > max_val:\n            max_val = num\n    return max_val',
+            'time_complexity': 'O(n)',
+            'space_complexity': 'O(1)'
         },
         'linked_list': {
-            'question': 'Reverse a linked list',
-            'solution': 'Use iterative approach with prev, curr, next pointers',
-            'complexity': 'O(n) time, O(1) space'
+            'question': 'Reverse a singly linked list',
+            'examples': 'Input: 1->2->3->4->5 Output: 5->4->3->2->1',
+            'solution': 'Use three pointers: prev, curr, and next. Iterate through the list, reversing the direction of each link.',
+            'code': 'def reverse_list(head):\n    prev = None\n    curr = head\n    while curr:\n        next_node = curr.next\n        curr.next = prev\n        prev = curr\n        curr = next_node\n    return prev',
+            'time_complexity': 'O(n)',
+            'space_complexity': 'O(1)'
         },
         'tree': {
-            'question': 'Find height of binary tree',
-            'solution': 'Use recursive approach: max(left_height, right_height) + 1',
-            'complexity': 'O(n) time, O(h) space where h is height'
+            'question': 'Find the height of a binary tree',
+            'examples': 'Input: Tree with root->left->right, root->right Output: 2',
+            'solution': 'Use recursion. Height = max(left_subtree_height, right_subtree_height) + 1. Base case: empty tree has height 0.',
+            'code': 'def tree_height(root):\n    if not root:\n        return 0\n    left_height = tree_height(root.left)\n    right_height = tree_height(root.right)\n    return max(left_height, right_height) + 1',
+            'time_complexity': 'O(n)',
+            'space_complexity': 'O(h)'
+        },
+        'graph': {
+            'question': 'Implement breadth-first search (BFS) traversal',
+            'examples': 'Input: Graph with vertices 0,1,2,3 and edges [(0,1),(0,2),(1,3)] Output: [0,1,2,3]',
+            'solution': 'Use a queue to visit nodes level by level. Mark visited nodes to avoid cycles.',
+            'code': 'from collections import deque\n\ndef bfs(graph, start):\n    visited = set()\n    queue = deque([start])\n    result = []\n    \n    while queue:\n        node = queue.popleft()\n        if node not in visited:\n            visited.add(node)\n            result.append(node)\n            queue.extend(graph[node])\n    return result',
+            'time_complexity': 'O(V + E)',
+            'space_complexity': 'O(V)'
         },
         'sorting': {
             'question': 'Implement merge sort algorithm',
-            'solution': 'Divide array into halves, recursively sort, then merge',
-            'complexity': 'O(n log n) time, O(n) space'
-        },
-        'graph': {
-            'question': 'Implement breadth-first search (BFS)',
-            'solution': 'Use queue to visit nodes level by level',
-            'complexity': 'O(V + E) time, O(V) space'
+            'examples': 'Input: [64, 34, 25, 12, 22, 11, 90] Output: [11, 12, 22, 25, 34, 64, 90]',
+            'solution': 'Divide array into halves, recursively sort each half, then merge the sorted halves.',
+            'code': 'def merge_sort(arr):\n    if len(arr) <= 1:\n        return arr\n    \n    mid = len(arr) // 2\n    left = merge_sort(arr[:mid])\n    right = merge_sort(arr[mid:])\n    \n    return merge(left, right)\n\ndef merge(left, right):\n    result = []\n    i = j = 0\n    while i < len(left) and j < len(right):\n        if left[i] <= right[j]:\n            result.append(left[i])\n            i += 1\n        else:\n            result.append(right[j])\n            j += 1\n    result.extend(left[i:])\n    result.extend(right[j:])\n    return result',
+            'time_complexity': 'O(n log n)',
+            'space_complexity': 'O(n)'
         }
     }
     
-    default = basic_questions.get(topic, {
-        'question': f'Solve a {difficulty} {topic} problem',
-        'solution': 'Think about the problem step by step',
-        'complexity': 'Analyze time and space requirements'
+    default_data = basic_questions.get(topic, {
+        'question': f'Solve a {difficulty} level {topic} problem',
+        'examples': 'Example will be provided based on the specific problem',
+        'solution': f'Apply {topic} concepts step by step to solve the problem efficiently',
+        'code': f'# {topic.title()} implementation\n# Code will depend on the specific problem',
+        'time_complexity': 'O(n)',
+        'space_complexity': 'O(1)'
     })
     
     return {
         "questions": [{
             "id": 1,
-            "question": default['question'],
-            "examples": ["Example will be provided with solution"],
-            "solution_explanation": default['solution'],
-            "code": "# Code implementation here",
-            "time_complexity": default['complexity'].split(',')[0] if ',' in default['complexity'] else 'O(n)',
-            "space_complexity": default['complexity'].split(',')[1].strip() if ',' in default['complexity'] else 'O(1)',
+            "question": default_data['question'],
+            "examples": default_data['examples'],
+            "solution": default_data['solution'],
+            "code": default_data['code'],
+            "time_complexity": default_data['time_complexity'],
+            "space_complexity": default_data['space_complexity'],
             "difficulty": difficulty,
             "topic": topic
         }]
     }
 
-# NEW: Direct DSA question answering using Groq
 def answer_dsa_question_with_groq(question: str, context: str = "") -> dict:
     """Answer DSA questions directly using Groq API"""
     api_key = current_app.config.get("GROQ_API_KEY")
@@ -448,14 +432,22 @@ def generate_response_by_intent(classification: dict, original_query: str) -> di
             "summary": "I'm here for both fun and learning!"
         }
     
-    # NEW: Handle question generation requests
+    # ENHANCED: Better question generation handling
     if t == "question_generation":
-        # Extract topic and difficulty from query
         processor = QueryProcessor()
         ctx = processor.extract_dsa_context(original_query)
         
-        # Determine topic
-        topic = ctx['topics'][0] if ctx['topics'] else 'general'
+        # Determine topic - enhanced detection
+        topic = 'general'  # default
+        if ctx['topics']:
+            topic = ctx['topics'][0]
+        else:
+            # Try to extract topic from query manually
+            query_lower = original_query.lower()
+            for topic_key, keywords in DSA_TOPICS.items():
+                if any(keyword in query_lower for keyword in keywords):
+                    topic = topic_key
+                    break
         
         # Determine difficulty from query
         difficulty = 'medium'  # default
@@ -466,41 +458,55 @@ def generate_response_by_intent(classification: dict, original_query: str) -> di
             difficulty = 'hard'
         
         # Generate questions using Groq API
+        logger.info(f"Generating questions for topic: {topic}, difficulty: {difficulty}")
         questions_data = generate_dsa_questions_with_groq(topic, difficulty, 2)
         
-        if questions_data.get("error"):
+        if questions_data.get("error") or not questions_data.get("questions"):
             return {
                 **base,
                 "best_book": {
                     "title": "Question Generation 🤔",
-                    "content": "I'm having trouble generating questions right now. Please specify a topic (arrays, trees, graphs, etc.) and I'll help you practice!\n\nExample: 'Generate easy array questions'"
+                    "content": "I'm having trouble generating questions right now. Please specify a topic (arrays, trees, graphs, etc.) and I'll help you practice!\n\nExample: 'Generate easy array questions' or 'Give me graph problems'"
                 },
                 "summary": "Specify a DSA topic for practice questions."
             }
         
-        # Format the response with generated questions
+        # FIXED: Better content formatting for frontend display
         questions = questions_data.get("questions", [])
         if questions:
-            content = f"Here are some {difficulty} practice questions about {topic}:\n\n"
+            content = f"Here are some **{difficulty}** practice questions about **{topic.replace('_', ' ').title()}**:\n\n"
+            
             for i, q in enumerate(questions[:2], 1):
-                content += f"**Question {i}:** {q.get('question', 'N/A')}\n\n"
+                content += f"## 📝 Question {i}\n\n"
+                content += f"**Problem:** {q.get('question', 'N/A')}\n\n"
+                
                 if q.get('examples'):
-                    content += f"**Examples:** {', '.join(q['examples'])}\n\n"
-                content += f"**Solution:** {q.get('solution_explanation', 'See code below')}\n\n"
+                    content += f"**Example:** {q.get('examples')}\n\n"
+                
+                content += f"**Solution Approach:**\n{q.get('solution', 'See code implementation')}\n\n"
+                
                 if q.get('code'):
-                    content += f"**Code:**\n```python\n{q['code']}\n```\n\n"
-                content += f"**Complexity:** {q.get('time_complexity', 'N/A')} time, {q.get('space_complexity', 'N/A')} space\n\n"
-                content += "---\n\n"
+                    content += f"**Implementation:**\n```python\n{q.get('code')}\n```\n\n"
+                
+                content += f"**Complexity Analysis:**\n"
+                content += f"- Time: {q.get('time_complexity', 'O(n)')}\n"
+                content += f"- Space: {q.get('space_complexity', 'O(1)')}\n\n"
+                
+                if i < len(questions):
+                    content += "---\n\n"
+            
+            # Add encouraging message
+            content += f"\n💡 **Tips:** Practice these step by step. Start with the examples and try to implement before looking at the solution!"
         else:
-            content = f"I can help you practice {topic} problems. What specific aspect would you like to focus on?"
+            content = f"I can help you practice {topic.replace('_', ' ')} problems. What specific aspect would you like to focus on?"
         
         return {
             **base,
             "best_book": {
-                "title": f"{difficulty.title()} {topic.title()} Practice Questions 📝",
+                "title": f"{difficulty.title()} {topic.replace('_', ' ').title()} Practice Questions 📚",
                 "content": content
             },
-            "summary": f"Generated {len(questions)} practice questions for {topic}"
+            "summary": f"Generated {len(questions)} practice questions for {topic.replace('_', ' ')}"
         }
     
     if t == "vague_question":
@@ -509,17 +515,17 @@ def generate_response_by_intent(classification: dict, original_query: str) -> di
                 **base,
                 "best_book": {
                     "title": "What is DSA? 🎯",
-                    "content": "DSA stands for Data Structures and Algorithms.\n\n- Data Structures organize data (arrays, trees, graphs)\n- Algorithms solve problems (sorting, searching)\n\nIt's essential for interviews and scalable systems."
+                    "content": "DSA stands for **Data Structures and Algorithms**.\n\n**Data Structures** organize and store data efficiently:\n- Arrays, Linked Lists, Stacks, Queues\n- Trees, Graphs, Hash Tables\n\n**Algorithms** solve problems step-by-step:\n- Sorting, Searching\n- Graph traversal, Dynamic Programming\n\nDSA is essential for coding interviews and building scalable systems!"
                 },
-                "summary": "DSA = Data Structures + Algorithms."
+                "summary": "DSA = Data Structures + Algorithms for efficient problem solving."
             }
         return {
             **base,
             "best_book": {
                 "title": "I'm here to help! 🤝",
-                "content": "Please specify a topic: algorithms (sorting/searching), data structures (trees/graphs), problem solving, or complexity.\n\nYou can also ask me to generate practice questions!"
+                "content": "Please specify what you'd like to learn about:\n\n**Topics I can help with:**\n- Data Structures (arrays, trees, graphs, etc.)\n- Algorithms (sorting, searching, DP, etc.)\n- Complexity analysis\n- Practice problems generation\n\n**Try asking:**\n- \"Explain binary trees\"\n- \"Generate array problems\"\n- \"How does merge sort work?\""
             },
-            "summary": "Specify a DSA topic to continue."
+            "summary": "Specify a DSA topic and I'll help you learn!"
         }
     
     # IMPORTANT: Return None for dsa_specific so it goes to the main DSA processing
@@ -539,7 +545,7 @@ def enhanced_summarize_with_context(text: str, ctx: dict, original_query: str) -
         prompt += "Provide clear examples and step-by-step explanations. "
     if ctx.get('comparison_asked'):
         prompt += "Compare different approaches and their trade-offs. "
-    if ctx.get('question_generation_asked'):  # NEW: Handle question generation context
+    if ctx.get('question_generation_asked'):
         prompt += "Focus on practice questions and learning exercises. "
     
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -557,7 +563,6 @@ def enhanced_summarize_with_context(text: str, ctx: dict, original_query: str) -
         res = requests.post(current_app.config["GROQ_CHAT_API_URL"], headers=headers, json=payload, timeout=15)
         res.raise_for_status()
         
-        # FIXED: Same response parsing fix here
         response_json = res.json()
         choices = response_json.get("choices")
         if isinstance(choices, list) and len(choices) > 0:
