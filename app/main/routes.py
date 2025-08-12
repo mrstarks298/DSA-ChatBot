@@ -1,0 +1,391 @@
+import time
+from . import bp
+import logging
+import uuid
+from datetime import datetime
+from flask import render_template, jsonify, request, session, make_response, redirect, url_for
+from ..extensions import supabase
+logger = logging.getLogger("dsa-mentor")
+from ..services.intent import (
+    classify_query_with_groq, generate_response_by_intent,
+    QueryProcessor, enhanced_summarize_with_context
+)
+from ..services.embeddings import fetch_text_df, fetch_qa_df, _to_array
+from ..services.search import best_text_for_query, top_qa_for_query
+from ..services.videos import get_videos
+from ..services.pdf import generate_pdf_from_html
+
+# In-memory store for development - replace with database in production
+chat_threads = {}
+
+def is_authenticated():
+    """Check if user is authenticated"""
+    return 'google_id' in session
+
+def get_current_user_id():
+    """Get current user ID"""
+    return session.get('google_id')
+
+def get_current_user():
+    """Get current user data"""
+    return {
+        'is_authenticated': is_authenticated(),
+        'name': session.get('name'),
+        'email': session.get('email'),
+        'google_id': session.get('google_id')
+    }
+
+@bp.route("/")
+def index():
+    user_data = get_current_user()
+    return render_template("index.html", user=user_data)
+
+@bp.route('/chat/<thread_id>')
+def shared_chat(thread_id):
+    """Handle shared chat links"""
+    try:
+        # Validate thread_id format
+        if not thread_id or not thread_id.startswith('thread_'):
+            return redirect(url_for('main.index'))
+        
+        # Check if thread exists (optional - depends on your storage)
+        user_data = get_current_user()
+        
+        return render_template('index.html', 
+                             user=user_data, 
+                             shared_thread_id=thread_id)
+    except Exception as e:
+        logger.error(f"Error loading shared chat: {e}")
+        return redirect(url_for('main.index'))
+
+@bp.route("/query", methods=["POST"])
+def handle_query():
+    """Modified query endpoint to handle thread IDs"""
+    try:
+        # Check authentication
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        data = request.get_json() or {}
+        raw_query = (data.get("query") or "").strip()
+        thread_id = data.get('thread_id', '')  # Get thread ID from request
+        
+        if not raw_query:
+            return jsonify({"error": "Missing query"}), 400
+            
+        # Validate thread ID format if provided
+        if thread_id and not thread_id.startswith('thread_'):
+            return jsonify({'error': 'Invalid thread ID'}), 400
+        
+        # Generate thread_id if not provided
+        if not thread_id:
+            thread_id = f"thread_{str(uuid.uuid4())}"
+        
+        # Get user ID
+        user_id = get_current_user_id()
+        
+        # Save the user message
+        save_message(user_id, thread_id, 'user', raw_query)
+        
+        # Process the query (your existing logic)
+        classification = classify_query_with_groq(raw_query)
+        logger.info(f"Query: '{raw_query}' -> Classification: {classification}")
+
+        contextual = generate_response_by_intent(classification, raw_query)
+        if contextual:
+            # Save the AI response
+            save_message(user_id, thread_id, 'assistant', contextual)
+            response_data = {**contextual, "query_info": {"original_query": raw_query, "classification": classification}, "thread_id": thread_id}
+            return jsonify(response_data)
+
+        if classification.get("is_dsa", False):
+            processor = QueryProcessor()
+            cleaned = processor.clean_and_normalize_query(raw_query)
+            ctx = processor.extract_dsa_context(cleaned)
+
+            text_df = fetch_text_df()
+            qa_df = fetch_qa_df()
+
+            best_content = best_text_for_query(cleaned, text_df)
+            summary = enhanced_summarize_with_context(best_content.get("content",""), ctx, raw_query)
+            top_qa = top_qa_for_query(cleaned, qa_df, k=5)
+
+            videos = get_videos(cleaned, limit=3)
+            if not videos and ctx.get('topics'):
+                for topic in ctx['topics'][:2]:
+                    videos.extend(get_videos(topic, limit=2))
+                    if len(videos) >= 3:
+                        break
+            if not videos:
+                for kw in ['algorithm','data structure','programming','coding']:
+                    if kw in cleaned:
+                        videos.extend(get_videos(kw, limit=2))
+                        break
+            videos = videos[:3]
+
+            response_data = {
+                "best_book": {
+                    "title": (best_content.get("content","DSA Content")[:50] + "...") if best_content.get("content") else "DSA Learning Content",
+                    "content": best_content.get("content", "Content not found"),
+                    "similarity": best_content.get("similarity", 0.0)
+                },
+                "summary": summary or "Based on your query about DSA concepts, here's the most relevant information.",
+                "top_dsa": top_qa if isinstance(top_qa, list) else [],
+                "video_suggestions": videos if isinstance(videos, list) else [],
+                "query_info": {
+                    "original_query": raw_query,
+                    "cleaned_query": cleaned,
+                    "classification": classification,
+                    "context": ctx
+                },
+                "thread_id": thread_id
+            }
+            
+            # Save the AI response
+            save_message(user_id, thread_id, 'assistant', response_data)
+            return jsonify(response_data)
+
+        # Default response
+        response_data = {
+            "best_book": {"title": "I'm not sure how to help with that 🤔",
+                          "content": "I specialize in DSA. Try: 'Explain binary search'."},
+            "summary": "Please ask me about a specific DSA topic!",
+            "top_dsa": [], "video_suggestions": [],
+            "query_info": {"original_query": raw_query, "classification": classification},
+            "thread_id": thread_id
+        }
+        
+        # Save the AI response
+        save_message(user_id, thread_id, 'assistant', response_data)
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.exception("Error handling query")
+        return jsonify({
+            "error":"Internal server error",
+            "best_book":{"title":"Error","content":"Sorry, something went wrong. Please try again."},
+            "summary":"An error occurred processing your request.",
+            "top_dsa": [], "video_suggestions":[]
+        }), 500
+
+@bp.route("/generate-pdf", methods=["POST"])
+def generate_pdf():
+    """Modified PDF generation to include thread ID"""
+    try:
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        data = request.get_json() or {}
+        html_content = data.get("html")
+        thread_id = data.get('thread_id', 'unknown')
+        
+        if not html_content:
+            return jsonify({"error":"Missing HTML content"}), 400
+            
+        html_content = html_content.replace('@import url(', '<!-- @import url(')
+        pdf = generate_pdf_from_html(html_content)
+        
+        resp = make_response(pdf)
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'attachment; filename=dsa-mentor-{thread_id}-{int(time.time())}.pdf'
+        return resp
+        
+    except Exception as e:
+        logger.exception("PDF generation error")
+        return jsonify({"error": f"PDF generation failed: {e}"}), 500
+
+# Helper functions for thread management
+def save_message(user_id, thread_id, sender, content):
+    """Save a message to your database/storage"""
+    try:
+        message_data = {
+            'user_id': user_id,
+            'thread_id': thread_id,
+            'sender': sender,  # 'user' or 'assistant'
+            'content': content,
+            'timestamp': datetime.utcnow().isoformat(),
+            'id': str(uuid.uuid4())
+        }
+        
+        # TODO: Store in Supabase instead of memory
+        # You should create a 'chat_messages' table in Supabase with these columns:
+        # id (uuid, primary key), user_id (text), thread_id (text), sender (text), 
+        # content (jsonb for complex responses), timestamp (timestamptz)
+        
+        # For now, store in memory (replace with Supabase)
+        if thread_id not in chat_threads:
+            chat_threads[thread_id] = []
+        chat_threads[thread_id].append(message_data)
+        
+    except Exception as e:
+        logger.error(f"Error saving message: {e}")
+
+def load_chat_thread(user_id, thread_id):
+    """Load a chat thread from database"""
+    try:
+        # TODO: Load from Supabase
+        # result = supabase.table('chat_messages').select('*').eq('user_id', user_id).eq('thread_id', thread_id).order('timestamp').execute()
+        # return result.data
+        
+        # For now, return from memory
+        thread_messages = chat_threads.get(thread_id, [])
+        # Filter by user_id for security
+        return [msg for msg in thread_messages if msg['user_id'] == user_id]
+        
+    except Exception as e:
+        logger.error(f"Error loading chat thread: {e}")
+        return []
+
+def get_user_threads(user_id):
+    """Get all thread IDs for a user"""
+    try:
+        # TODO: Query Supabase for unique thread_ids for this user
+        # result = supabase.table('chat_messages').select('thread_id').eq('user_id', user_id).execute()
+        # return list(set([row['thread_id'] for row in result.data]))
+        
+        # For now, return from memory
+        user_threads = []
+        for thread_id, messages in chat_threads.items():
+            if any(msg['user_id'] == user_id for msg in messages):
+                user_threads.append(thread_id)
+        return user_threads
+        
+    except Exception as e:
+        logger.error(f"Error getting user threads: {e}")
+        return []
+
+# API endpoints for thread management
+@bp.route('/api/thread/<thread_id>')
+def get_thread(thread_id):
+    """Get messages for a specific thread"""
+    try:
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        user_id = get_current_user_id()
+        messages = load_chat_thread(user_id, thread_id)
+        
+        return jsonify({
+            'thread_id': thread_id,
+            'messages': messages
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting thread: {e}")
+        return jsonify({'error': 'Failed to load thread'}), 500
+
+@bp.route('/api/threads')
+def get_user_thread_list():
+    """Get all threads for the current user"""
+    try:
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        user_id = get_current_user_id()
+        thread_ids = get_user_threads(user_id)
+        
+        # Get basic info for each thread
+        threads = []
+        for thread_id in thread_ids:
+            messages = load_chat_thread(user_id, thread_id)
+            if messages:
+                first_message = messages[0] if messages else None
+                last_message = messages[-1] if messages else None
+                
+                # Get preview from user message content
+                preview_content = ""
+                if first_message:
+                    if isinstance(first_message['content'], str):
+                        preview_content = first_message['content']
+                    elif isinstance(first_message['content'], dict):
+                        preview_content = first_message['content'].get('query', '') or str(first_message['content'])
+                
+                threads.append({
+                    'thread_id': thread_id,
+                    'created_at': first_message['timestamp'] if first_message else None,
+                    'updated_at': last_message['timestamp'] if last_message else None,
+                    'message_count': len(messages),
+                    'preview': (preview_content[:100] + '...') if len(preview_content) > 100 else preview_content
+                })
+        
+        # Sort by last updated
+        threads.sort(key=lambda x: x['updated_at'] or x['created_at'], reverse=True)
+        
+        return jsonify({'threads': threads})
+        
+    except Exception as e:
+        logger.error(f"Error getting threads: {e}")
+        return jsonify({'error': 'Failed to load threads'}), 500
+
+# Your existing routes remain the same
+@bp.route("/debug-qa-detailed")  
+def debug_qa_detailed():
+    try:
+        res = supabase.table("qa1_resources").select("*").limit(10).execute()
+        
+        debug_info = {
+            "total_rows": len(res.data) if res.data else 0,
+            "columns": list(res.data[0].keys()) if res.data and len(res.data) > 0 else [],
+            "sample_data": []
+        }
+        
+        if res.data:
+            for i, row in enumerate(res.data[:3]):
+                embedding_data = row.get('embedding')
+                
+                from ..services.embeddings import _to_array
+                parsed_embedding = _to_array(embedding_data)
+                
+                debug_info["sample_data"].append({
+                    "id": row.get('id'),
+                    "section": row.get('section'),
+                    "question": row.get('question')[:100] + "..." if row.get('question') and len(row.get('question')) > 100 else row.get('question'),
+                    "has_article_link": bool(row.get('article_link')),
+                    "has_practice_link": bool(row.get('practice_link')),
+                    "article_link": row.get('article_link'),
+                    "practice_link": row.get('practice_link'),
+                    "embedding_raw_type": str(type(embedding_data)),
+                    "embedding_raw_length": len(str(embedding_data)) if embedding_data else 0,
+                    "embedding_starts_with": str(embedding_data)[:50] if embedding_data else None,
+                    "parsed_embedding_type": str(type(parsed_embedding)),
+                    "parsed_embedding_shape": parsed_embedding.shape if hasattr(parsed_embedding, 'shape') else None,
+                    "parsing_successful": parsed_embedding is not None
+                })
+        
+        return jsonify(debug_info)
+    except Exception as e:
+        logger.exception("Debug QA error")
+        return jsonify({"error": str(e)}), 500
+
+@bp.route("/videos/<topic>")
+def videos_topic(topic):
+    vids = get_videos(topic, limit=5)
+    if not vids:
+        general = get_videos("introduction", limit=3)
+        return jsonify({"topic": topic, "videos": general, "message": f"No specific videos for '{topic}', showing general."})
+    return jsonify({"topic": topic, "videos": vids, "total_count": len(vids)})
+
+@bp.route("/videos/search")
+def videos_search():
+    q = (request.args.get("q") or "").strip()
+    difficulty = (request.args.get("difficulty") or "").strip()
+    limit = int(request.args.get("limit", 10))
+    if not q:
+        return jsonify({"error":"Missing search query"}), 400
+    vids = get_videos(q, limit=limit)
+    if difficulty:
+        vids = [v for v in vids if v.get("difficulty") == difficulty]
+    return jsonify({"query": q, "difficulty_filter": difficulty, "videos": vids, "total_count": len(vids)})
+
+@bp.route("/test-videos")
+def test_videos():
+    vids = get_videos("algorithm", limit=3)
+    return jsonify({"status":"success","video_count": len(vids),"sample_videos": vids[:2] if vids else []})
+
+@bp.route("/debug-embeddings")
+def debug_embeddings():
+    try:
+        res = supabase.table("text_embeddings").select("id, embedding::text").limit(2).execute()
+        return jsonify({"status":"success","raw_data_sample": res.data[:1] if res.data else [], "total_records": len(res.data or [])})
+    except Exception as e:
+        return jsonify({"status":"error","error": str(e)}), 500
