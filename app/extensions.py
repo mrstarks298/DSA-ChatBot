@@ -47,5 +47,4 @@ def init_extensions(app):
     
     if supabase is None:
         logger.error("CRITICAL: Supabase client is still None after initialization!")
-    if model is None:
-        logger.error("CRITICAL: SentenceTransformer model is still None after initialization!")
+    
