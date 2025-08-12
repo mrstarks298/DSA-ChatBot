@@ -6,12 +6,12 @@ from sentence_transformers import SentenceTransformer
 logger = logging.getLogger("dsa-mentor")
 
 # Initialize immediately instead of waiting for init_extensions
-# url = "https://tsuwpbunvavtygtnsypm.supabase.co"
-# key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdXdwYnVudmF2dHlndG5zeXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ4MTkyODIsImV4cCI6MjA3MDM5NTI4Mn0.oUl9B1cZWWu4uE4m5fKdkmlpXN3Gqe9Cj6Gsc4rJJ8g"
+url = "https://tsuwpbunvavtygtnsypm.supabase.co"
+key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdXdwYnVudmF2dHlndG5zeXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ4MTkyODIsImV4cCI6MjA3MDM5NTI4Mn0.oUl9B1cZWWu4uE4m5fKdkmlpXN3Gqe9Cj6Gsc4rJJ8g"
 
 
-url = os.environ.get("SUPABASE_URL", url)
-key = os.environ.get("SUPABASE_KEY", key)
+# url = os.environ.get("SUPABASE_URL", url)
+# key = os.environ.get("SUPABASE_KEY", key)
 
 print(f"DEBUG: Initializing Supabase with URL: {url}")
 print(f"DEBUG: Supabase key is set: {bool(key)}")
