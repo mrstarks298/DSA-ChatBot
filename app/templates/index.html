@@ -311,9 +311,11 @@
     function toggleSidebar() {
   const sidebar = document.querySelector('.sidebar');
   const overlay = document.querySelector('.sidebar-overlay');
+  const body = document.body;
   
   sidebar.classList.toggle('open');
   overlay.classList.toggle('active');
+  body.classList.toggle('sidebar-open'); // Add this line
 }
 </script>
 
