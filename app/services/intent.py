@@ -16,6 +16,7 @@ DSA_TOPICS = {
     'recursion': ['recursion', 'recursive', 'backtracking']
 }
 
+
 class QueryProcessor:
     @staticmethod
     def clean_and_normalize_query(query: str) -> str:
@@ -181,6 +182,181 @@ Respond with ONLY valid JSON in this format:
     except Exception as e:
         logger.error(f"Groq classification error: {e}")
         return classify_query_fallback(user_query)
+# Add this debugging code to your generate_dsa_questions_with_groq function
+
+def generate_dsa_questions_with_groq(topic: str, difficulty: str = 'medium', count: int = 3) -> dict:
+    """Generate DSA questions with answers using Groq API"""
+    api_key = current_app.config.get("GROQ_API_KEY")
+    if not api_key:
+        logger.warning("No Groq API key for question generation")
+        return {"questions": [], "error": "API key not available"}
+    
+    topic_mapping = {
+        'array': 'Arrays and Array Manipulation',
+        'linked_list': 'Linked Lists',
+        'stack': 'Stack Data Structure', 
+        'queue': 'Queue Data Structure',
+        'tree': 'Binary Trees and Tree Traversal',
+        'graph': 'Graph Algorithms and Traversal',
+        'sorting': 'Sorting Algorithms',
+        'searching': 'Searching Algorithms',
+        'dynamic_programming': 'Dynamic Programming',
+        'recursion': 'Recursion and Backtracking'
+    }
+    
+    formatted_topic = topic_mapping.get(topic.lower(), topic)
+    
+    # SIMPLIFIED prompt for better Groq response
+    system_prompt = f"""Generate {count} {difficulty} level coding questions about {formatted_topic}.
+
+For each question, provide:
+- Problem statement
+- Example input/output  
+- Solution explanation
+- Python code
+- Time/space complexity
+
+Return as JSON:
+{{
+  "questions": [
+    {{
+      "question": "problem here",
+      "example": "Input: [1,2] Output: 3", 
+      "solution": "explanation here",
+      "code": "def solve(): pass",
+      "time": "O(n)",
+      "space": "O(1)"
+    }}
+  ]
+}}"""
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    payload = {
+        "model": "llama3-70b-8192",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Generate {count} {difficulty} {formatted_topic} questions as JSON"}
+        ],
+        "temperature": 0.5,  # Reduced temperature
+        "max_tokens": 1500   # Reduced tokens
+    }
+    
+    try:
+        logger.info(f"🚀 Calling Groq API for {topic} questions...")
+        res = requests.post(current_app.config["GROQ_CHAT_API_URL"], headers=headers, json=payload, timeout=20)
+        res.raise_for_status()
+        
+        response_json = res.json()
+        
+        # DEBUG: Log the raw response
+        logger.info(f"📥 Groq raw response: {response_json}")
+        
+        choices = response_json.get("choices")
+        if isinstance(choices, list) and len(choices) > 0:
+            content = choices[0].get("message", {}).get("content", "")
+        elif isinstance(choices, dict):
+            content = choices.get("message", {}).get("content", "")
+        else:
+            logger.error(f"❌ Unexpected choices format: {type(choices)}")
+            return _generate_fallback_questions(topic, difficulty, count)
+        
+        # DEBUG: Log the content before parsing
+        logger.info(f"📄 Groq content before cleaning: {repr(content[:500])}")
+        
+        # Clean up JSON response
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        
+        content = content.strip()
+        
+        # DEBUG: Log cleaned content
+        logger.info(f"🧹 Cleaned content: {repr(content[:500])}")
+        
+        try:
+            questions_data = json.loads(content)
+            
+            # DEBUG: Log parsed data
+            logger.info(f"✅ Successfully parsed questions: {len(questions_data.get('questions', []))} questions")
+            logger.info(f"📋 Question titles: {[q.get('question', 'No title')[:50] for q in questions_data.get('questions', [])]}")
+            
+            return questions_data
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON decode error: {e}")
+            logger.error(f"🔍 Failed content: {repr(content)}")
+            
+            # Try to extract questions from non-JSON content
+            return _extract_questions_from_text(content, topic, difficulty)
+            
+    except requests.RequestException as e:
+        logger.error(f"❌ Groq API request error: {e}")
+        return _generate_fallback_questions(topic, difficulty, count)
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in question generation: {e}")
+        return _generate_fallback_questions(topic, difficulty, count)
+
+def _extract_questions_from_text(content: str, topic: str, difficulty: str) -> dict:
+    """Extract questions from non-JSON Groq response"""
+    logger.info("🔧 Attempting to extract questions from text response...")
+    
+    # Simple extraction - look for common patterns
+    questions = []
+    
+    # Split by question numbers or common separators
+    parts = re.split(r'\n(?=\*\*Question|\d+\.|\#)', content, flags=re.MULTILINE)
+    
+    for i, part in enumerate(parts[:3], 1):  # Limit to 3 questions
+        if len(part.strip()) > 50:  # Only process substantial content
+            questions.append({
+                "id": i,
+                "question": f"Generated {topic} problem #{i}",
+                "example": "See detailed explanation below",
+                "solution": part.strip()[:500] + "..." if len(part) > 500 else part.strip(),
+                "code": "# See solution explanation above for implementation details",
+                "time": "O(n)",
+                "space": "O(1)"
+            })
+    
+    if not questions:
+        # If extraction fails, create one question with all content
+        questions = [{
+            "id": 1,
+            "question": f"{difficulty.title()} {topic.replace('_', ' ').title()} Problem",
+            "example": "Multiple examples provided in solution",
+            "solution": content[:1000] + "..." if len(content) > 1000 else content,
+            "code": "# Implementation details provided in the explanation above",
+            "time": "Varies based on approach",
+            "space": "Varies based on approach"
+        }]
+    
+    logger.info(f"🎯 Extracted {len(questions)} questions from text")
+    return {"questions": questions}
+
+def _generate_fallback_questions(topic: str, difficulty: str, count: int) -> dict:
+    """This should ONLY be called when Groq completely fails"""
+    logger.warning(f"⚠️ Using fallback questions for {topic} - Groq API failed!")
+    
+    # Your existing fallback code here...
+    # (Keep your existing fallback implementation)
+    
+    return {
+        "questions": [{
+            "id": 1,
+            "question": f"FALLBACK: {topic} problem (Groq API failed)",
+            "example": "This is a fallback question",
+            "solution": "The Groq API failed to generate questions. Please try again.",
+            "code": "# Fallback code",
+            "time": "O(n)",
+            "space": "O(1)"
+        }]
+    }
 
 def generate_dsa_questions_with_groq(topic: str, difficulty: str = 'medium', count: int = 3) -> dict:
     """Generate DSA questions with answers using Groq API"""
