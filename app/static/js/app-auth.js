@@ -250,10 +250,20 @@
     if (data.summary) {
       html += `<div class="concept-explanation">${escapeHtml(data.summary)}</div>`;
     } else if (data.best_book?.content) {
-      let c = data.best_book.content;
-      if (c.length > 500) c = c.substring(0, 500) + '...';
-      html += `<div class="concept-explanation">${escapeHtml(c)}</div>`;
-    }
+  // Don't truncate content for question generation
+  let c = data.best_book.content;
+  
+  // Simple markdown-like rendering for better display
+  c = c.replace(/\n/g, '<br>')                    // Line breaks
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  // Bold
+        .replace(/```python\n([\s\S]*?)\n```/g, '<pre><code>$1</code></pre>')  // Code blocks
+        .replace(/`([^`]+)`/g, '<code>$1</code>')  // Inline code
+        .replace(/^# (.*$)/gm, '<h2>$1</h2>')      // Headers
+        .replace(/^## (.*$)/gm, '<h3>$1</h3>')     // Subheaders
+        .replace(/^- (.*$)/gm, '<li>$1</li>');     // List items
+  
+  html += `<div class="concept-explanation">${c}</div>`;
+}
     if (data.best_book?.content && /complexity|time|space/i.test(data.best_book.content)) {
       html += `
         <div class="complexity-badges">
