@@ -77,9 +77,8 @@ def shared_chat(thread_id):
         if not thread_id or not thread_id.startswith('thread_'):
             return redirect(url_for('main.index'))
         
-        # Check authentication - REQUIRE LOGIN for shared chats
+        # Check authentication - redirect to login if needed
         if not is_authenticated():
-            # Redirect to login with return URL
             from urllib.parse import quote
             login_url = f"/auth/login?next={quote(request.url)}"
             return redirect(login_url)
