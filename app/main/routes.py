@@ -16,7 +16,6 @@ from ..services.videos import get_videos
 from ..services.pdf import generate_pdf_from_html
 
 # In-memory store for development - replace with database in production
-chat_threads = {}
 
 def is_authenticated():
     """Check if user is authenticated"""
@@ -334,7 +333,7 @@ def get_thread(thread_id):
 
 @bp.route('/api/threads')
 def get_user_thread_list():
-    """Get all threads for the current user"""
+    """Get all threads for the current user - UPDATED VERSION"""
     try:
         if not is_authenticated():
             return jsonify({'error': 'Authentication required'}), 401
@@ -342,33 +341,13 @@ def get_user_thread_list():
         user_id = get_current_user_id()
         thread_ids = get_user_threads(user_id)
         
-        # Get basic info for each thread
+        # Get summary info for each thread
         threads = []
         for thread_id in thread_ids:
-            messages = load_chat_thread(user_id, thread_id)
-            if messages:
-                first_message = messages[0] if messages else None
-                last_message = messages[-1] if messages else None
-                
-                # Get preview from user message content
-                preview_content = ""
-                if first_message:
-                    if isinstance(first_message['content'], str):
-                        preview_content = first_message['content']
-                    elif isinstance(first_message['content'], dict):
-                        preview_content = first_message['content'].get('query', '') or str(first_message['content'])
-                
-                threads.append({
-                    'thread_id': thread_id,
-                    'created_at': first_message['timestamp'] if first_message else None,
-                    'updated_at': last_message['timestamp'] if last_message else None,
-                    'message_count': len(messages),
-                    'preview': (preview_content[:100] + '...') if len(preview_content) > 100 else preview_content
-                })
+            thread_summary = get_thread_summary(user_id, thread_id)
+            threads.append(thread_summary)
         
-        # Sort by last updated
-        threads.sort(key=lambda x: x['updated_at'] or x['created_at'], reverse=True)
-        
+        # Already sorted by latest first from get_user_threads()
         return jsonify({'threads': threads})
         
     except Exception as e:
