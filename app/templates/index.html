@@ -7,7 +7,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/app.css" />
 </head>
-<body data-theme="light">
+<body data-theme="light" 
+      data-shared-view="{{ 'true' if is_shared_view else 'false' }}" 
+      data-shared-thread-id="{{ shared_thread_id or '' }}">
   <div class="app-container">
     <!-- Sidebar -->
     <div class="sidebar">
