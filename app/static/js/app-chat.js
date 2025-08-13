@@ -82,28 +82,25 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
         </svg>
-        <span>📤 You're viewing a shared conversation • Read-only mode</span>
+        <span>📤 You're viewing a shared conversation • You can continue chatting</span>
       `;
       chatContent.prepend(banner);
     },
     
     makeReadOnly() {
+      // Don't disable input - allow users to continue chatting
       if (chatInput) {
-        chatInput.disabled = true;
-        chatInput.placeholder = 'This is a shared chat (read-only)';
-        chatInput.style.background = '#f5f5f5';
+        chatInput.placeholder = 'Continue this conversation...';
       }
-      if (sendButton) {
-        sendButton.disabled = true;
-        sendButton.style.opacity = '0.5';
-      }
+      
+      // Update new thread button text but keep functional
       const newThreadBtn = $('newThreadBtn');
       if (newThreadBtn) {
         newThreadBtn.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 4V20M4 12H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
-          Start Your Own Chat
+          New Chat
         `;
       }
     }
