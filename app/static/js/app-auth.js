@@ -590,7 +590,26 @@
   });
 
   // Expose public APIs needed by second file/HTML
-  window.app.render = { addMessage, addBotResponse, addLoadingMessage, removeLoadingMessage, updateSavedMessagesList, showSavedMessageContent, addSavedMessageToChat };
+  window.app.render = { 
+  addMessage, 
+  addBotResponse,
+  addBotMessage: (content, messageId) => {
+    // Create empty message with the given ID
+    if (!chatContent) return;
+    const div = document.createElement('div');
+    div.className = 'message bot-message';
+    div.id = messageId;
+    div.innerHTML = `
+      <div class="message-header">
+        <div class="avatar bot-avatar">AI</div>
+        <span class="sender-name">DSA Mentor</span>
+      </div>
+      <div class="message-content">${content || ''}</div>
+    `;
+    chatContent.appendChild(div);
+    scrollToBottom();
+  }
+};
   window.app.saved  = { loadSavedMessages, saveSavedMessages };
   window.app.video  = { extractYouTubeID, openVideoModal, closeVideoModal };
   window.sendMessage = sendMessage;
