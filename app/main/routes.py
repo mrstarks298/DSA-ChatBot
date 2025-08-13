@@ -39,7 +39,7 @@ def index():
     user_data = get_current_user()
     return render_template("index.html", user=user_data)
 
-ef get_shared_thread_messages(thread_id):
+def get_shared_thread_messages(thread_id):
     """Get messages for a shared thread (public access)"""
     try:
         result = supabase.table('chat_messages')\
