@@ -194,65 +194,123 @@ def generate_pdf():
         logger.exception("PDF generation error")
         return jsonify({"error": f"PDF generation failed: {e}"}), 500
 
-# Helper functions for thread management
 def save_message(user_id, thread_id, sender, content):
-    """Save a message to your database/storage"""
+    """Save a message to Supabase database"""
     try:
         message_data = {
             'user_id': user_id,
             'thread_id': thread_id,
             'sender': sender,  # 'user' or 'assistant'
             'content': content,
-            'timestamp': datetime.utcnow().isoformat(),
-            'id': str(uuid.uuid4())
         }
         
-        # TODO: Store in Supabase instead of memory
-        # You should create a 'chat_messages' table in Supabase with these columns:
-        # id (uuid, primary key), user_id (text), thread_id (text), sender (text), 
-        # content (jsonb for complex responses), timestamp (timestamptz)
+        # Store in Supabase
+        result = supabase.table('chat_messages').insert(message_data).execute()
         
-        # For now, store in memory (replace with Supabase)
-        if thread_id not in chat_threads:
-            chat_threads[thread_id] = []
-        chat_threads[thread_id].append(message_data)
+        if result.data:
+            logger.info(f"Message saved to thread {thread_id}")
+            return result.data[0]
+        else:
+            logger.error(f"Failed to save message: {result}")
+            return None
         
     except Exception as e:
         logger.error(f"Error saving message: {e}")
-
-def load_chat_thread(user_id, thread_id):
-    """Load a chat thread from database"""
-    try:
-        # TODO: Load from Supabase
-        # result = supabase.table('chat_messages').select('*').eq('user_id', user_id).eq('thread_id', thread_id).order('timestamp').execute()
-        # return result.data
+        return None
         
-        # For now, return from memory
-        thread_messages = chat_threads.get(thread_id, [])
-        # Filter by user_id for security
-        return [msg for msg in thread_messages if msg['user_id'] == user_id]
+def load_chat_thread(user_id, thread_id):
+    """Load a chat thread from Supabase database"""
+    try:
+        result = supabase.table('chat_messages')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .eq('thread_id', thread_id)\
+            .order('timestamp')\
+            .execute()
+        
+        return result.data if result.data else []
         
     except Exception as e:
         logger.error(f"Error loading chat thread: {e}")
         return []
 
 def get_user_threads(user_id):
-    """Get all thread IDs for a user"""
+    """Get all thread IDs for a user from Supabase with better performance"""
     try:
-        # TODO: Query Supabase for unique thread_ids for this user
-        # result = supabase.table('chat_messages').select('thread_id').eq('user_id', user_id).execute()
-        # return list(set([row['thread_id'] for row in result.data]))
+        # Get distinct thread_ids with their latest timestamp
+        result = supabase.table('chat_messages')\
+            .select('thread_id, timestamp')\
+            .eq('user_id', user_id)\
+            .order('timestamp', desc=True)\
+            .execute()
         
-        # For now, return from memory
-        user_threads = []
-        for thread_id, messages in chat_threads.items():
-            if any(msg['user_id'] == user_id for msg in messages):
-                user_threads.append(thread_id)
-        return user_threads
-        
+        if result.data:
+            # Get unique thread_ids while preserving latest-first order
+            seen = set()
+            unique_threads = []
+            for row in result.data:
+                thread_id = row['thread_id']
+                if thread_id not in seen:
+                    seen.add(thread_id)
+                    unique_threads.append(thread_id)
+            return unique_threads
+        return []
     except Exception as e:
         logger.error(f"Error getting user threads: {e}")
         return []
+def get_thread_summary(user_id, thread_id):
+    """Get thread summary for display in thread list"""
+    try:
+        # Get first user message for preview
+        first_msg = supabase.table('chat_messages')\
+            .select('content, timestamp')\
+            .eq('user_id', user_id)\
+            .eq('thread_id', thread_id)\
+            .eq('sender', 'user')\
+            .order('timestamp')\
+            .limit(1)\
+            .execute()
+        
+        # Get message count and last timestamp
+        stats = supabase.table('chat_messages')\
+            .select('timestamp')\
+            .eq('user_id', user_id)\
+            .eq('thread_id', thread_id)\
+            .execute()
+        
+        preview_content = ""
+        created_at = None
+        
+        if first_msg.data:
+            msg = first_msg.data[0]
+            created_at = msg['timestamp']
+            content = msg['content']
+            
+            if isinstance(content, str):
+                preview_content = content
+            elif isinstance(content, dict):
+                preview_content = content.get('query', '') or str(content)
+        
+        message_count = len(stats.data) if stats.data else 0
+        updated_at = max([msg['timestamp'] for msg in stats.data]) if stats.data else created_at
+        
+        return {
+            'thread_id': thread_id,
+            'created_at': created_at,
+            'updated_at': updated_at,
+            'message_count': message_count,
+            'preview': (preview_content[:100] + '...') if len(preview_content) > 100 else preview_content
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting thread summary: {e}")
+        return {
+            'thread_id': thread_id,
+            'created_at': None,
+            'updated_at': None,
+            'message_count': 0,
+            'preview': 'Error loading preview'
+        }
 
 # API endpoints for thread management
 @bp.route('/api/thread/<thread_id>')
