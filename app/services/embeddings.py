@@ -4,27 +4,86 @@ import numpy as np
 import pandas as pd
 import requests
 import os
+import time
 from ..extensions import supabase, logger
 
 HF_API_URL = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
 HF_API_TOKEN = os.getenv("HF_API_TOKEN")
+HF_API_TOKEN_BACKUP = os.getenv("HF_API_TOKEN_BACKUP")
 
-headers = {"Authorization": f"Bearer {HF_API_TOKEN}"} if HF_API_TOKEN else {}
-
-def get_embedding_from_api(text: str):
-    """Get embedding vector from Hugging Face Inference API."""
-    if not HF_API_TOKEN:
-        logger.error("HF_API_TOKEN not set in environment.")
+def get_embedding_from_api(text: str, use_backup=False, max_retries=3):
+    """Get embedding vector from Hugging Face Inference API with backup and retry logic."""
+    # Choose token
+    token = HF_API_TOKEN_BACKUP if use_backup else HF_API_TOKEN
+    
+    if not token:
+        error_msg = f"{'Backup' if use_backup else 'Primary'} HF_API_TOKEN not set in environment."
+        logger.error(error_msg)
         return None
+    
+    headers = {"Authorization": f"Bearer {token}"}
     payload = {"inputs": text}
-    try:
-        response = requests.post(HF_API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        embedding = response.json()
-        return np.array(embedding)
-    except Exception as e:
-        logger.error(f"Error getting embedding from API: {e}")
-        return None
+    
+    for attempt in range(max_retries):
+        try:
+            logger.debug(f"API request attempt {attempt + 1}/{max_retries} using {'backup' if use_backup else 'primary'} token")
+            
+            response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=15)
+            response.raise_for_status()
+            embedding = response.json()
+            
+            logger.debug(f"Successfully got embedding using {'backup' if use_backup else 'primary'} token")
+            return np.array(embedding)
+            
+        except requests.exceptions.Timeout as e:
+            logger.warning(f"Timeout on attempt {attempt + 1} with {'backup' if use_backup else 'primary'} token: {e}")
+            
+            # If primary token times out and backup is available, try backup
+            if not use_backup and HF_API_TOKEN_BACKUP and attempt == 0:
+                logger.info("Primary token timed out, trying backup token")
+                return get_embedding_from_api(text, use_backup=True, max_retries=max_retries)
+            
+            # If this was the last attempt, break and handle below
+            if attempt == max_retries - 1:
+                logger.error(f"All attempts timed out for {'backup' if use_backup else 'primary'} token")
+                break
+                
+            # Exponential backoff for retry
+            wait_time = 2 ** attempt
+            logger.info(f"Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+            
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Request error on attempt {attempt + 1} with {'backup' if use_backup else 'primary'} token: {e}")
+            
+            # Try backup token if primary fails and backup is available
+            if not use_backup and HF_API_TOKEN_BACKUP and attempt == 0:
+                logger.info("Primary token failed, trying backup token")
+                return get_embedding_from_api(text, use_backup=True, max_retries=max_retries)
+            
+            # If this was the last attempt, break and handle below
+            if attempt == max_retries - 1:
+                logger.error(f"All attempts failed for {'backup' if use_backup else 'primary'} token")
+                break
+                
+            # Exponential backoff for retry
+            wait_time = 2 ** attempt
+            logger.info(f"Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error getting embedding from API: {e}")
+            
+            # Try backup token if primary fails and this is first attempt
+            if not use_backup and HF_API_TOKEN_BACKUP and attempt == 0:
+                logger.info("Primary token had unexpected error, trying backup token")
+                return get_embedding_from_api(text, use_backup=True, max_retries=max_retries)
+            
+            break
+    
+    # If we get here, all attempts failed
+    logger.error(f"Failed to get embedding after {max_retries} attempts with {'backup' if use_backup else 'primary'} token")
+    return None
 
 def _to_array(embedding_data):
     """Parse embeddings stored in different formats into numpy arrays with debug."""
