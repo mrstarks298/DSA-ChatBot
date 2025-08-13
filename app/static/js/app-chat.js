@@ -2,20 +2,35 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
 
+  // Check if window.app exists and has required modules
+  if (!window.app || !window.app.state || !window.app.util || !window.app.render) {
+    console.error('Required app modules not found. Make sure base app is loaded first.');
+    return;
+  }
+
   const { state, util, auth, render, saved } = window.app;
   const { showToast, updateShareLink } = util;
-  const { stopPeriodicAuthCheck } = auth;
+  const { stopPeriodicAuthCheck } = auth || {};
 
-  const chatInput     = $('chatInput');
-  const sendButton    = $('sendButton');
-  const downloadBtn   = $('downloadBtn');
-  const shareBtn      = $('shareBtn');
+  const chatInput = $('chatInput');
+  const sendButton = $('sendButton');
+  const downloadBtn = $('downloadBtn');
+  const shareBtn = $('shareBtn');
   const clearSavedBtn = $('clearSavedBtn');
+
+  // Check if required elements exist
+  if (!chatInput || !sendButton) {
+    console.error('Required DOM elements not found:', {
+      chatInput: !!chatInput,
+      sendButton: !!sendButton
+    });
+    return;
+  }
 
   // ===== SCROLL MANAGEMENT =====
   const ScrollManager = {
     autoScrollEnabled: true,
-    scrollThreshold: 100, // pixels from bottom
+    scrollThreshold: 100,
     
     init() {
       this.createScrollButton();
@@ -23,6 +38,9 @@
     },
     
     createScrollButton() {
+      // Check if button already exists
+      if ($('scrollToBottomBtn')) return;
+      
       const scrollBtn = document.createElement('button');
       scrollBtn.id = 'scrollToBottomBtn';
       scrollBtn.className = 'scroll-to-bottom-btn hidden';
@@ -55,19 +73,22 @@
       scrollBtn.addEventListener('click', () => this.scrollToBottom(true));
       document.body.appendChild(scrollBtn);
       
-      // Add CSS for smooth transitions
-      const style = document.createElement('style');
-      style.textContent = `
-        .scroll-to-bottom-btn.visible {
-          opacity: 1 !important;
-          visibility: visible !important;
-        }
-        .scroll-to-bottom-btn:hover {
-          background: #1565c0 !important;
-          transform: translateY(-2px);
-        }
-      `;
-      document.head.appendChild(style);
+      // Add CSS for smooth transitions (check if already exists)
+      if (!document.getElementById('scroll-btn-styles')) {
+        const style = document.createElement('style');
+        style.id = 'scroll-btn-styles';
+        style.textContent = `
+          .scroll-to-bottom-btn.visible {
+            opacity: 1 !important;
+            visibility: visible !important;
+          }
+          .scroll-to-bottom-btn:hover {
+            background: #1565c0 !important;
+            transform: translateY(-2px);
+          }
+        `;
+        document.head.appendChild(style);
+      }
     },
     
     attachScrollListeners() {
@@ -75,7 +96,6 @@
       
       window.addEventListener('scroll', () => {
         clearTimeout(scrollTimeout);
-        
         scrollTimeout = setTimeout(() => {
           this.updateScrollButton();
           this.updateAutoScrollState();
@@ -92,7 +112,6 @@
     },
     
     updateAutoScrollState() {
-      // Disable auto-scroll if user scrolls up manually
       const isNearBottom = this.isNearBottom();
       this.autoScrollEnabled = isNearBottom;
     },
@@ -111,14 +130,12 @@
           top: document.documentElement.scrollHeight,
           behavior: 'smooth'
         });
-        this.autoScrollEnabled = true; // Re-enable after manual scroll to bottom
+        this.autoScrollEnabled = true;
       }
     },
     
-    // Call this when new content is added
     onNewContent() {
       if (this.autoScrollEnabled) {
-        // Small delay to ensure content is rendered
         setTimeout(() => this.scrollToBottom(), 100);
       }
     }
@@ -130,12 +147,11 @@
     
     async writeText(element, text, options = {}) {
       const {
-        speed = 20, // milliseconds between characters
+        speed = 20,
         enableMarkdown = true,
         onComplete = null
       } = options;
       
-      // Generate unique ID for this animation
       const animationId = Date.now() + Math.random();
       this.activeAnimations.add(animationId);
       
@@ -159,7 +175,6 @@
       
       return new Promise((resolve) => {
         const writeChar = () => {
-          // Check if animation was cancelled
           if (!this.activeAnimations.has(animationId)) {
             resolve();
             return;
@@ -168,10 +183,7 @@
           if (currentIndex < text.length) {
             element.textContent += text[currentIndex];
             currentIndex++;
-            
-            // Trigger scroll update
             ScrollManager.onNewContent();
-            
             setTimeout(writeChar, speed);
           } else {
             resolve();
@@ -183,28 +195,19 @@
     },
     
     async writeMarkdownText(element, text, speed, animationId) {
-      // Pre-process markdown to HTML
       const htmlContent = this.parseMarkdownToHTML(text);
-      
-      // Create a temporary element to parse HTML
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = htmlContent;
-      
-      // Stream the content progressively
       await this.streamHTMLContent(element, tempDiv, speed, animationId);
     },
     
     async streamHTMLContent(targetElement, sourceElement, speed, animationId) {
       const textNodes = this.getTextNodes(sourceElement);
-      
-      // Clone the structure but with empty text content
       targetElement.innerHTML = sourceElement.innerHTML;
       const targetTextNodes = this.getTextNodes(targetElement);
       
-      // Clear all text content initially
       targetTextNodes.forEach(node => node.textContent = '');
       
-      // Stream text into each node
       for (let i = 0; i < textNodes.length && this.activeAnimations.has(animationId); i++) {
         const sourceText = textNodes[i].textContent;
         const targetNode = targetTextNodes[i];
@@ -228,7 +231,6 @@
           targetNode.textContent += text[currentIndex];
           currentIndex++;
           
-          // Trigger scroll update periodically
           if (currentIndex % 10 === 0) {
             ScrollManager.onNewContent();
           }
@@ -260,7 +262,6 @@
     },
     
     parseMarkdownToHTML(text) {
-      // Basic markdown parsing - you can enhance this or use a library like marked.js
       return text
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -280,18 +281,19 @@
   const EnhancedRender = {
     async renderBotResponse(data, messageId) {
       const messageElement = document.getElementById(messageId);
-      if (!messageElement) return;
+      if (!messageElement) {
+        console.error('Message element not found:', messageId);
+        return;
+      }
       
       const contentElement = messageElement.querySelector('.message-content');
-      if (!contentElement) return;
+      if (!contentElement) {
+        console.error('Content element not found in message:', messageId);
+        return;
+      }
       
-      // Show typing indicator first
       this.showTypingIndicator(contentElement);
-      
-      // Small delay for better UX
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Start streaming the response
       await this.streamResponseContent(contentElement, data);
     },
     
@@ -304,7 +306,6 @@
         </div>
       `;
       
-      // Add CSS for typing animation if not exists
       if (!document.getElementById('typing-styles')) {
         const style = document.createElement('style');
         style.id = 'typing-styles';
@@ -346,75 +347,85 @@
     async streamResponseContent(element, data) {
       let fullHTML = '';
       
-      // Build the response HTML
-      if (data.best_book?.title) {
-        fullHTML += `
-          <div class="concept-title">${data.best_book.title}</div>
-        `;
-      }
-      
-      if (data.summary) {
-        fullHTML += `
-          <div class="concept-explanation">
-            <h4>📝 Summary</h4>
-            <p>${data.summary}</p>
-          </div>
-        `;
-      }
-      
-      if (data.best_book?.content) {
-        fullHTML += `
-          <div class="concept-explanation">
-            <h4>📚 Detailed Content</h4>
-            <div>${this.formatContent(data.best_book.content)}</div>
-          </div>
-        `;
-      }
-      
-      if (data.top_dsa?.length) {
-        fullHTML += `
-          <div class="related-qa">
-            <h4>🎯 Related Questions</h4>
-            ${data.top_dsa.map((qa, i) => `
-              <div class="qa-item">
-                <div class="question">${qa.question || 'Practice Question'}</div>
-                ${qa.article_link && qa.article_link !== '#' ? 
-                  `<a href="${qa.article_link}" target="_blank" class="qa-link">📖 Read Article</a>` : ''
-                }
-                ${qa.practice_link && qa.practice_link !== '#' ? 
-                  `<a href="${qa.practice_link}" target="_blank" class="qa-link">💻 Practice</a>` : ''
-                }
-              </div>
-            `).join('')}
-          </div>
-        `;
-      }
-      
-      if (data.video_suggestions?.length) {
-        fullHTML += `
-          <div class="video-suggestions">
-            <h4>🎥 Video Recommendations</h4>
-            <div class="video-grid">
-              ${data.video_suggestions.map(video => `
-                <div class="video-card" onclick="openVideoModal('${video.embed_url}', '${video.title}')">
-                  <img src="${video.thumbnail_url}" alt="${video.title}" class="video-thumbnail">
-                  <div class="video-info">
-                    <div class="video-title">${video.title}</div>
-                    <div class="video-meta">${video.difficulty} • ${video.duration}</div>
-                  </div>
+      // Handle different response formats
+      if (typeof data === 'string') {
+        fullHTML = data;
+      } else if (data && typeof data === 'object') {
+        if (data.best_book?.title) {
+          fullHTML += `<div class="concept-title">${data.best_book.title}</div>`;
+        }
+        
+        if (data.summary) {
+          fullHTML += `
+            <div class="concept-explanation">
+              <h4>📝 Summary</h4>
+              <p>${data.summary}</p>
+            </div>
+          `;
+        }
+        
+        if (data.best_book?.content) {
+          fullHTML += `
+            <div class="concept-explanation">
+              <h4>📚 Detailed Content</h4>
+              <div>${this.formatContent(data.best_book.content)}</div>
+            </div>
+          `;
+        }
+        
+        if (data.top_dsa?.length) {
+          fullHTML += `
+            <div class="related-qa">
+              <h4>🎯 Related Questions</h4>
+              ${data.top_dsa.map((qa, i) => `
+                <div class="qa-item">
+                  <div class="question">${qa.question || 'Practice Question'}</div>
+                  ${qa.article_link && qa.article_link !== '#' ? 
+                    `<a href="${qa.article_link}" target="_blank" class="qa-link">📖 Read Article</a>` : ''
+                  }
+                  ${qa.practice_link && qa.practice_link !== '#' ? 
+                    `<a href="${qa.practice_link}" target="_blank" class="qa-link">💻 Practice</a>` : ''
+                  }
                 </div>
               `).join('')}
             </div>
-          </div>
-        `;
+          `;
+        }
+        
+        if (data.video_suggestions?.length) {
+          fullHTML += `
+            <div class="video-suggestions">
+              <h4>🎥 Video Recommendations</h4>
+              <div class="video-grid">
+                ${data.video_suggestions.map(video => `
+                  <div class="video-card" onclick="openVideoModal('${video.embed_url}', '${video.title}')">
+                    <img src="${video.thumbnail_url}" alt="${video.title}" class="video-thumbnail">
+                    <div class="video-info">
+                      <div class="video-title">${video.title}</div>
+                      <div class="video-meta">${video.difficulty} • ${video.duration}</div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }
+        
+        // Fallback for simple response
+        if (!fullHTML && data.response) {
+          fullHTML = data.response;
+        }
       }
       
-      // Stream the content with typing effect
+      // Fallback to simple text if no HTML generated
+      if (!fullHTML) {
+        fullHTML = typeof data === 'string' ? data : 'No response content available.';
+      }
+      
       await StreamingWriter.writeText(element, fullHTML, {
-        speed: 15, // Faster for better UX
+        speed: 15,
         enableMarkdown: true,
         onComplete: () => {
-          // Scroll to show new content if auto-scroll is enabled
           ScrollManager.onNewContent();
         }
       });
@@ -437,6 +448,8 @@
     const query = chatInput?.value?.trim();
     if (!query || sendButton?.disabled) return;
 
+    console.log('Sending message:', query); // Debug log
+
     // Disable input during processing
     if (sendButton) sendButton.disabled = true;
     if (chatInput) {
@@ -450,56 +463,90 @@
       if (welcomeScreen) welcomeScreen.style.display = 'none';
 
       // Add user message
-      render.addMessage('user', query);
+      if (render && render.addMessage) {
+        render.addMessage('user', query);
+      } else {
+        console.error('render.addMessage not available');
+      }
+      
       if (chatInput) chatInput.value = '';
-
-      // Scroll to show user message
       ScrollManager.onNewContent();
 
       // Add bot message placeholder
       const messageId = `msg-${Date.now()}`;
-      render.addBotMessage('', messageId);
+      if (render && render.addBotMessage) {
+        render.addBotMessage('', messageId);
+      } else {
+        console.error('render.addBotMessage not available');
+      }
 
-      // Send request
+      // Prepare request data
+      const requestData = { 
+        query
+      };
+      
+      // Add thread_id if available
+      if (state && state.currentThreadId) {
+        requestData.thread_id = state.currentThreadId;
+      }
+
+      console.log('Sending request to /query with data:', requestData); // Debug log
+
+      // Send request with better error handling
       const response = await fetch('/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          query, 
-          thread_id: state.currentThreadId 
-        })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(requestData)
       });
 
-      const data = await response.json();
+      console.log('Response status:', response.status); // Debug log
 
-      if (response.ok) {
-        // Update thread ID if provided
-        if (data.thread_id) {
-          state.currentThreadId = data.thread_id;
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server error response:', errorText);
+        throw new Error(`Server error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('Response data:', data); // Debug log
+
+      // Update thread ID if provided
+      if (data.thread_id && state) {
+        state.currentThreadId = data.thread_id;
+        if (updateShareLink) {
           updateShareLink();
         }
-
-        // Stream the response
-        await EnhancedRender.renderBotResponse(data, messageId);
-      } else {
-        // Show error message
-        const errorElement = document.getElementById(messageId);
-        if (errorElement) {
-          const contentElement = errorElement.querySelector('.message-content');
-          if (contentElement) {
-            contentElement.innerHTML = `
-              <div class="error-message">
-                <h4>❌ Error</h4>
-                <p>${data.error || 'Something went wrong. Please try again.'}</p>
-              </div>
-            `;
-          }
-        }
-        showToast('Error: ' + (data.error || 'Request failed'));
       }
+
+      // Stream the response
+      await EnhancedRender.renderBotResponse(data, messageId);
+
     } catch (error) {
       console.error('Send message error:', error);
-      showToast('Network error. Please check your connection.');
+      
+      // Show error in the message
+      const errorElement = document.getElementById(messageId);
+      if (errorElement) {
+        const contentElement = errorElement.querySelector('.message-content');
+        if (contentElement) {
+          contentElement.innerHTML = `
+            <div class="error-message">
+              <h4>❌ Error</h4>
+              <p>${error.message || 'Something went wrong. Please try again.'}</p>
+              <small>Check the console for more details.</small>
+            </div>
+          `;
+        }
+      }
+      
+      if (showToast) {
+        showToast('Error: ' + (error.message || 'Request failed'));
+      } else {
+        alert('Error: ' + (error.message || 'Request failed'));
+      }
     } finally {
       // Re-enable input
       if (sendButton) sendButton.disabled = false;
@@ -511,7 +558,7 @@
     }
   };
 
-  // ===== SHARED CHAT FUNCTIONALITY (Updated) =====
+  // ===== SHARED CHAT FUNCTIONALITY =====
   const SharedChat = {
     isSharedView: false,
     sharedThreadId: null,
@@ -536,49 +583,48 @@
           const welcomeScreen = $('welcomeScreen');
           if (welcomeScreen) welcomeScreen.style.display = 'none';
           
-          // Load messages with streaming effect
           await this.displaySharedMessages(data.messages);
           this.showSharedBanner(threadId);
           
-          if (window.app?.state) {
-            window.app.state.currentThreadId = threadId;
+          if (state) {
+            state.currentThreadId = threadId;
           }
         } else {
           console.error('Failed to load shared chat:', data.error);
-          showToast('Failed to load shared chat: ' + data.error);
+          if (showToast) {
+            showToast('Failed to load shared chat: ' + data.error);
+          }
         }
       } catch (error) {
         console.error('Error loading shared chat:', error);
-        showToast('Error loading shared chat');
+        if (showToast) {
+          showToast('Error loading shared chat');
+        }
       }
     },
     
     async displaySharedMessages(messages) {
       const chatContent = $('chatContent');
-      if (!chatContent) return;
+      if (!chatContent || !Array.isArray(messages)) return;
       
-      // Disable auto-scroll during bulk message loading
       ScrollManager.autoScrollEnabled = false;
       
       for (const message of messages) {
         if (message.sender === 'user') {
-          render.addMessage('user', message.content);
+          if (render && render.addMessage) {
+            render.addMessage('user', message.content);
+          }
         } else if (message.sender === 'assistant') {
           const messageId = `msg-${Date.now()}-${Math.random()}`;
-          render.addBotMessage('', messageId);
-          
-          // Small delay between messages for better UX
-          await new Promise(resolve => setTimeout(resolve, 200));
-          
-          // Stream each message
-          await EnhancedRender.renderBotResponse(message.content, messageId);
-          
-          // Brief pause between messages
-          await new Promise(resolve => setTimeout(resolve, 300));
+          if (render && render.addBotMessage) {
+            render.addBotMessage('', messageId);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await EnhancedRender.renderBotResponse(message.content, messageId);
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
         }
       }
       
-      // Re-enable auto-scroll and scroll to bottom
       ScrollManager.autoScrollEnabled = true;
       ScrollManager.scrollToBottom(true);
     },
@@ -604,36 +650,51 @@
     }
   };
 
-  // ===== EXISTING MESSAGE ACTIONS (Unchanged) =====
+  // ===== MESSAGE ACTIONS =====
   window.copyMessage = function(messageId) {
     const el = document.getElementById(messageId);
     if (!el) return;
     const text = el.querySelector('.message-content')?.innerText;
     if (text && navigator.clipboard) {
       navigator.clipboard.writeText(text)
-        .then(() => showToast('Message copied to clipboard!'))
-        .catch(() => showToast('Failed to copy message'));
+        .then(() => {
+          if (showToast) {
+            showToast('Message copied to clipboard!');
+          }
+        })
+        .catch(() => {
+          if (showToast) {
+            showToast('Failed to copy message');
+          }
+        });
     }
   };
 
   window.saveMessage = function(messageId) {
+    if (!state || !state.savedMessages) return;
+    
     const el = document.getElementById(messageId);
     if (!el) return;
+    
     const btn = el.querySelector('.action-btn[onclick*="saveMessage"]');
     const map = state.savedMessages;
+    
     if (map.has(messageId)) {
       map.delete(messageId);
       if (btn) btn.classList.remove('saved');
-      saved.saveSavedMessages();
-      render.updateSavedMessagesList();
-      showToast('Message removed from saved items');
+      if (saved && saved.saveSavedMessages) saved.saveSavedMessages();
+      if (render && render.updateSavedMessagesList) render.updateSavedMessagesList();
+      if (showToast) showToast('Message removed from saved items');
       return;
     }
+    
     const contentEl = el.querySelector('.message-content');
     if (!contentEl) return;
+    
     const title = contentEl.querySelector('.concept-title')?.textContent || 'DSA Response';
     const preview = (contentEl.innerText || '').substring(0, 100) + '...';
     const fullContent = contentEl.innerHTML;
+    
     map.set(messageId, {
       id: messageId,
       title,
@@ -642,30 +703,32 @@
       threadId: state.currentThreadId,
       timestamp: new Date().toISOString()
     });
+    
     if (btn) btn.classList.add('saved');
-    saved.saveSavedMessages();
-    render.updateSavedMessagesList();
-    showToast('Message saved for later!');
+    if (saved && saved.saveSavedMessages) saved.saveSavedMessages();
+    if (render && render.updateSavedMessagesList) render.updateSavedMessagesList();
+    if (showToast) showToast('Message saved for later!');
   };
 
   window.shareMessage = function(messageId) {
-    updateShareLink();
+    if (updateShareLink) updateShareLink();
     const modal = $('shareModal');
     if (modal) modal.classList.add('active');
   };
 
-  // ===== SHARE FUNCTIONALITY (Unchanged) =====
+  // ===== SHARE FUNCTIONALITY =====
   async function shareCurrentChat() {
     if (SharedChat.isSharedView) {
       const shareLink = $('shareLink');
       if (shareLink) shareLink.value = window.location.href;
-      $('shareModal')?.classList.add('active');
+      const modal = $('shareModal');
+      if (modal) modal.classList.add('active');
       return;
     }
 
-    const currentThreadId = state.currentThreadId;
+    const currentThreadId = state?.currentThreadId;
     if (!currentThreadId) {
-      showToast('No active chat to share');
+      if (showToast) showToast('No active chat to share');
       return;
     }
 
@@ -681,27 +744,31 @@
         const shareLink = $('shareLink');
         if (shareLink) shareLink.value = data.share_url;
         
-        $('shareModal')?.classList.add('active');
+        const modal = $('shareModal');
+        if (modal) modal.classList.add('active');
         
         try {
           await navigator.clipboard.writeText(data.share_url);
-          showToast('Share link copied to clipboard!');
+          if (showToast) showToast('Share link copied to clipboard!');
         } catch (err) {
           console.log('Clipboard copy failed');
         }
       } else {
-        showToast('Failed to create share link: ' + data.error);
+        if (showToast) showToast('Failed to create share link: ' + data.error);
       }
     } catch (error) {
       console.error('Error creating share link:', error);
-      showToast('Error creating share link');
+      if (showToast) showToast('Error creating share link');
     }
   }
 
-  // ===== DOWNLOAD FUNCTIONALITY (Unchanged) =====
+  // ===== DOWNLOAD FUNCTIONALITY =====
   function downloadChat() {
     const nodes = document.querySelectorAll('.message');
-    if (!nodes.length) { showToast('No messages to download!'); return; }
+    if (!nodes.length) { 
+      if (showToast) showToast('No messages to download!'); 
+      return; 
+    }
     if (!downloadBtn) return;
 
     const original = downloadBtn.innerHTML;
@@ -718,10 +785,11 @@
         <div class="pdf-header">
           <h1>DSA Mentor Chat Export</h1>
           <p>Generated on ${new Date().toLocaleDateString()}</p>
-          <p>Thread ID: ${state.currentThreadId}</p>
+          <p>Thread ID: ${state?.currentThreadId || 'Unknown'}</p>
         </div>
         <div class="pdf-content">
     `;
+    
     nodes.forEach(n => {
       if (n.id?.startsWith('loading-')) return;
       const content = n.querySelector('.message-content')?.innerHTML;
@@ -729,6 +797,7 @@
       if (n.classList.contains('user-message')) html += `<div class="message user-message">${content}</div>`;
       else if (n.classList.contains('bot-message')) html += `<div class="message bot-message">${content}</div>`;
     });
+    
     html += `</div></div>`;
 
     fetch('/generate-pdf', {
@@ -736,29 +805,34 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         html,
-        thread_id: state.currentThreadId
+        thread_id: state?.currentThreadId || 'unknown'
       })
     })
-      .then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e)); return r.blob(); })
+      .then(r => { 
+        if (!r.ok) return r.json().then(e => Promise.reject(e)); 
+        return r.blob(); 
+      })
       .then(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `dsa-mentor-chat-${state.currentThreadId}-${new Date().toISOString().split('T')[0]}.pdf`;
+        a.download = `dsa-mentor-chat-${state?.currentThreadId || 'unknown'}-${new Date().toISOString().split('T')[0]}.pdf`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast('📄 PDF downloaded successfully!');
+        if (showToast) showToast('📄 PDF downloaded successfully!');
       })
-      .catch(() => showToast('❌ Error generating PDF. Please try again.'))
+      .catch(() => {
+        if (showToast) showToast('❌ Error generating PDF. Please try again.');
+      })
       .finally(() => {
         downloadBtn.innerHTML = original;
         downloadBtn.disabled = false;
       });
   }
 
-  // ===== MODAL FUNCTIONS (Unchanged) =====
+  // ===== MODAL FUNCTIONS =====
   window.closeModal = function(id) {
     const m = $(id);
     if (m) m.classList.remove('active');
@@ -770,50 +844,83 @@
       input.select?.();
       navigator.clipboard.writeText(input.value)
         .then(() => { 
-          showToast('Share link copied to clipboard!'); 
+          if (showToast) showToast('Share link copied to clipboard!'); 
           window.closeModal('shareModal'); 
         })
-        .catch(() => showToast('Failed to copy share link'));
+        .catch(() => {
+          if (showToast) showToast('Failed to copy share link');
+        });
     }
   };
 
   // ===== EVENT LISTENERS =====
   document.addEventListener('click', (e) => {
     if (e.target.classList?.contains('modal-overlay')) e.target.classList.remove('active');
-    if (e.target.classList?.contains('video-modal')) window.closeVideoModal?.();
-  });
-
-  sendButton?.addEventListener('click', () => window.sendMessage());
-  chatInput?.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      window.sendMessage();
+    if (e.target.classList?.contains('video-modal') && window.closeVideoModal) {
+      window.closeVideoModal();
     }
   });
+
+  // Attach event listeners if elements exist
+  if (sendButton) {
+    sendButton.addEventListener('click', () => window.sendMessage());
+  }
+
+  if (chatInput) {
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        window.sendMessage();
+      }
+    });
+  }
   
-  shareBtn?.addEventListener('click', shareCurrentChat);
-  downloadBtn?.addEventListener('click', downloadChat);
-  clearSavedBtn?.addEventListener('click', () => {
-    state.savedMessages.clear();
-    saved.saveSavedMessages();
-    render.updateSavedMessagesList();
-    showToast('All saved messages cleared!');
-  });
+  if (shareBtn) {
+    shareBtn.addEventListener('click', shareCurrentChat);
+  }
+
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', downloadChat);
+  }
+
+  if (clearSavedBtn) {
+    clearSavedBtn.addEventListener('click', () => {
+      if (state && state.savedMessages) {
+        state.savedMessages.clear();
+        if (saved && saved.saveSavedMessages) saved.saveSavedMessages();
+        if (render && render.updateSavedMessagesList) render.updateSavedMessagesList();
+        if (showToast) showToast('All saved messages cleared!');
+      }
+    });
+  }
 
   // ===== INITIALIZATION =====
-  saved.loadSavedMessages?.();
-  if (state.serverUser?.is_authenticated) chatInput?.focus();
+  try {
+    if (saved && saved.loadSavedMessages) {
+      saved.loadSavedMessages();
+    }
+    
+    if (state?.serverUser?.is_authenticated && chatInput) {
+      chatInput.focus();
+    }
 
-  // Initialize scroll management
-  ScrollManager.init();
-  
-  // Initialize shared chat functionality
-  SharedChat.init();
+    // Initialize scroll management
+    ScrollManager.init();
+    
+    // Initialize shared chat functionality
+    SharedChat.init();
+
+    console.log('App chat initialized successfully');
+  } catch (error) {
+    console.error('Error during initialization:', error);
+  }
 
   // ===== CLEANUP =====
   window.addEventListener('beforeunload', () => {
-    stopPeriodicAuthCheck?.();
-    StreamingWriter.stopAll(); // Stop any ongoing animations
+    if (stopPeriodicAuthCheck) {
+      stopPeriodicAuthCheck();
+    }
+    StreamingWriter.stopAll();
   });
 
   // Add keyboard shortcut to toggle auto-scroll
@@ -821,7 +928,11 @@
     if (e.ctrlKey && e.key === 'b') {
       e.preventDefault();
       ScrollManager.scrollToBottom(true);
-      showToast('Scrolled to bottom');
+      if (showToast) {
+        showToast('Scrolled to bottom');
+      }
     }
   });
+
+  console.log('App chat module loaded');
 })();
