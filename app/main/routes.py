@@ -39,23 +39,124 @@ def index():
     user_data = get_current_user()
     return render_template("index.html", user=user_data)
 
+ef get_shared_thread_messages(thread_id):
+    """Get messages for a shared thread (public access)"""
+    try:
+        result = supabase.table('chat_messages')\
+            .select('*')\
+            .eq('thread_id', thread_id)\
+            .order('timestamp')\
+            .execute()
+        
+        return result.data if result.data else []
+        
+    except Exception as e:
+        logger.error(f"Error loading shared thread: {e}")
+        return []
+
+def thread_exists(thread_id):
+    """Check if a thread exists"""
+    try:
+        result = supabase.table('chat_messages')\
+            .select('id')\
+            .eq('thread_id', thread_id)\
+            .limit(1)\
+            .execute()
+        
+        return len(result.data) > 0 if result.data else False
+        
+    except Exception as e:
+        logger.error(f"Error checking thread existence: {e}")
+        return False
+
 @bp.route('/chat/<thread_id>')
 def shared_chat(thread_id):
-    """Handle shared chat links"""
+    """Handle shared chat links - Updated Version"""
     try:
         # Validate thread_id format
         if not thread_id or not thread_id.startswith('thread_'):
             return redirect(url_for('main.index'))
         
-        # Check if thread exists (optional - depends on your storage)
+        # Check authentication - REQUIRE LOGIN for shared chats
+        if not is_authenticated():
+            # Redirect to login with return URL
+            from urllib.parse import quote
+            login_url = f"/auth/login?next={quote(request.url)}"
+            return redirect(login_url)
+        
+        # Check if thread exists
+        if not thread_exists(thread_id):
+            user_data = get_current_user()
+            return render_template('index.html', 
+                                 user=user_data, 
+                                 error_message="This chat thread doesn't exist or has been deleted.")
+        
         user_data = get_current_user()
         
         return render_template('index.html', 
                              user=user_data, 
-                             shared_thread_id=thread_id)
+                             shared_thread_id=thread_id,
+                             is_shared_view=True)
     except Exception as e:
         logger.error(f"Error loading shared chat: {e}")
         return redirect(url_for('main.index'))
+
+# Add new API endpoint for shared chat messages
+@bp.route('/api/shared/thread/<thread_id>')
+def get_shared_thread(thread_id):
+    """Get messages for a shared thread - PUBLIC ACCESS after login"""
+    try:
+        # Require authentication
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        # Validate thread_id format
+        if not thread_id or not thread_id.startswith('thread_'):
+            return jsonify({'error': 'Invalid thread ID'}), 400
+        
+        # Get messages (no user_id restriction for shared access)
+        messages = get_shared_thread_messages(thread_id)
+        
+        if not messages:
+            return jsonify({'error': 'Thread not found'}), 404
+        
+        return jsonify({
+            'thread_id': thread_id,
+            'messages': messages,
+            'is_shared': True
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting shared thread: {e}")
+        return jsonify({'error': 'Failed to load shared thread'}), 500
+
+# Add endpoint to generate shareable links
+@bp.route('/api/thread/<thread_id>/share', methods=['POST'])
+def create_share_link(thread_id):
+    """Generate a shareable link for a thread"""
+    try:
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        user_id = get_current_user_id()
+        
+        # Verify the user owns this thread
+        user_messages = load_chat_thread(user_id, thread_id)
+        if not user_messages:
+            return jsonify({'error': 'Thread not found or access denied'}), 404
+        
+        # Generate share URL
+        share_url = request.host_url.rstrip('/') + f'/chat/{thread_id}'
+        
+        return jsonify({
+            'share_url': share_url,
+            'thread_id': thread_id,
+            'message': 'Share link generated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating share link: {e}")
+        return jsonify({'error': 'Failed to create share link'}), 500
 
 @bp.route("/query", methods=["POST"])
 def handle_query():
