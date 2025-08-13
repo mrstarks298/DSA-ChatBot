@@ -44,11 +44,17 @@ def _is_session_valid():
 
 @bp.route('/login')
 def login():
-    flow = _google_flow()
+    # FIX: Use correct function name with underscore
+    flow = _google_flow()  # Changed from google_flow() to _google_flow()
     if not flow:
         return jsonify({"error": "Google authentication is not configured"}), 500
     
-    # FIXED: Clear any existing session data before starting new auth flow
+    # Store the 'next' URL parameter for redirect after login
+    next_url = request.args.get('next')
+    if next_url:
+        session['next_url'] = next_url
+    
+    # Clear any existing session data before starting new auth flow
     session.pop('google_id', None)
     session.pop('oauth_state', None)
     session.pop('oauth_start_time', None)
@@ -61,7 +67,7 @@ def login():
         access_type='offline',
         include_granted_scopes='true',
         state=state,
-        prompt='select_account'  # ADDED: Always show account selection
+        prompt='select_account'
     )
     return redirect(auth_url)
 
@@ -78,7 +84,7 @@ def oauth2callback():
         """)
     
     try:
-        # FIXED: Better error handling and debugging
+        # Better error handling and debugging
         state_from_session = session.get('oauth_state')
         state_from_request = request.args.get('state')
         
@@ -92,7 +98,7 @@ def oauth2callback():
         if time.time() - session.get('oauth_start_time', 0) > 300:
             raise ValueError("Authentication flow expired - please try again")
         
-        # FIXED: Better error handling for token fetch
+        # Better error handling for token fetch
         try:
             flow.fetch_token(authorization_response=request.url)
         except Exception as e:
@@ -111,11 +117,14 @@ def oauth2callback():
         if not idinfo.get('sub') or not idinfo.get('email'):
             raise ValueError("Missing required user information from Google")
 
-        # FIXED: Clear temporary session data first
+        # Clear temporary session data first
         session.pop('oauth_state', None)
         session.pop('oauth_start_time', None)
         
-        # FIXED: Set session configuration
+        # Get the next URL before updating session
+        next_url = session.pop('next_url', '/')
+        
+        # Set session configuration
         session.permanent = True
         current_app.permanent_session_lifetime = 3600  # 1 hour
         
@@ -130,6 +139,7 @@ def oauth2callback():
 
         logger.info(f"User {idinfo.get('email')} logged in successfully")
 
+        # FIXED: Redirect to the next URL (shared chat) after login
         return render_template_string("""
         <script>
           const userData = {
@@ -140,20 +150,21 @@ def oauth2callback():
             loginTime: {{login}}
           };
           localStorage.setItem('user_data', JSON.stringify(userData));
-          // FIXED: Add small delay to ensure storage is written
+          // Redirect to the shared chat or home page
           setTimeout(() => {
-            window.location.href = '/';
+            window.location.href = "{{next_url}}";
           }, 100);
         </script>
         """, 
         name=idinfo.get('name', '').replace('"', '\\"'),
         email=idinfo.get('email', '').replace('"', '\\"'),
         picture=idinfo.get('picture', '').replace('"', '\\"'),
-        login=int(time.time()))
+        login=int(time.time()),
+        next_url=next_url)
         
     except Exception as e:
         logger.error(f"OAuth callback error: {str(e)}")
-        # FIXED: Clean up session on error
+        # Clean up session on error
         session.pop('oauth_state', None)
         session.pop('oauth_start_time', None)
         session.pop('google_id', None)
