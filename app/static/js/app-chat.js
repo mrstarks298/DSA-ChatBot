@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
 
   const { state, util, auth, render, saved } = window.app;
-  const { showToast, updateShareLink } = util; // ADDED: Import updateShareLink
+  const { showToast, updateShareLink } = util;
   const { stopPeriodicAuthCheck } = auth;
 
   const chatInput     = $('chatInput');
@@ -12,7 +12,104 @@
   const shareBtn      = $('shareBtn');
   const clearSavedBtn = $('clearSavedBtn');
 
-  // Actions
+  // ===== SHARED CHAT FUNCTIONALITY =====
+  const SharedChat = {
+    isSharedView: false,
+    sharedThreadId: null,
+    
+    init() {
+      this.isSharedView = document.body.dataset.sharedView === 'true';
+      this.sharedThreadId = document.body.dataset.sharedThreadId;
+      
+      if (this.isSharedView && this.sharedThreadId) {
+        this.loadSharedChat(this.sharedThreadId);
+      }
+    },
+    
+    async loadSharedChat(threadId) {
+      try {
+        const response = await fetch(`/api/shared/thread/${threadId}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+          console.log('Loading shared chat:', data);
+          
+          const welcomeScreen = $('welcomeScreen');
+          if (welcomeScreen) welcomeScreen.style.display = 'none';
+          
+          this.displaySharedMessages(data.messages);
+          this.showSharedBanner(threadId);
+          this.makeReadOnly();
+          
+          if (window.app?.state) {
+            window.app.state.currentThreadId = threadId;
+          }
+        } else {
+          console.error('Failed to load shared chat:', data.error);
+          showToast('Failed to load shared chat: ' + data.error);
+        }
+      } catch (error) {
+        console.error('Error loading shared chat:', error);
+        showToast('Error loading shared chat');
+      }
+    },
+    
+    displaySharedMessages(messages) {
+      const chatContent = $('chatContent');
+      if (!chatContent) return;
+      
+      messages.forEach(message => {
+        if (message.sender === 'user') {
+          render.addMessage('user', message.content);
+        } else if (message.sender === 'assistant') {
+          render.addBotResponse(message.content);
+        }
+      });
+    },
+    
+    showSharedBanner(threadId) {
+      const chatContent = $('chatContent');
+      if (!chatContent || document.querySelector('.shared-chat-banner')) return;
+      
+      const banner = document.createElement('div');
+      banner.className = 'shared-chat-banner';
+      banner.style.cssText = `
+        background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px;
+        padding: 12px 16px; margin-bottom: 16px; color: #1976d2; font-size: 14px;
+        display: flex; align-items: center; gap: 8px;
+      `;
+      banner.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
+        </svg>
+        <span>📤 You're viewing a shared conversation • Read-only mode</span>
+      `;
+      chatContent.prepend(banner);
+    },
+    
+    makeReadOnly() {
+      if (chatInput) {
+        chatInput.disabled = true;
+        chatInput.placeholder = 'This is a shared chat (read-only)';
+        chatInput.style.background = '#f5f5f5';
+      }
+      if (sendButton) {
+        sendButton.disabled = true;
+        sendButton.style.opacity = '0.5';
+      }
+      const newThreadBtn = $('newThreadBtn');
+      if (newThreadBtn) {
+        newThreadBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 4V20M4 12H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          Start Your Own Chat
+        `;
+      }
+    }
+  };
+
+  // ===== EXISTING MESSAGE ACTIONS =====
   window.copyMessage = function(messageId) {
     const el = document.getElementById(messageId);
     if (!el) return;
@@ -57,13 +154,58 @@
   };
 
   window.shareMessage = function(messageId) {
-    // FIXED: Update share link before showing modal
     updateShareLink();
     const modal = $('shareModal');
     if (modal) modal.classList.add('active');
   };
 
-  // Download chat via server-rendered PDF
+  // ===== SHARE FUNCTIONALITY =====
+  async function shareCurrentChat() {
+    // If in shared view, just show current URL
+    if (SharedChat.isSharedView) {
+      const shareLink = $('shareLink');
+      if (shareLink) shareLink.value = window.location.href;
+      $('shareModal')?.classList.add('active');
+      return;
+    }
+
+    // Normal share functionality
+    const currentThreadId = state.currentThreadId;
+    if (!currentThreadId) {
+      showToast('No active chat to share');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/thread/${currentThreadId}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        const shareLink = $('shareLink');
+        if (shareLink) shareLink.value = data.share_url;
+        
+        $('shareModal')?.classList.add('active');
+        
+        try {
+          await navigator.clipboard.writeText(data.share_url);
+          showToast('Share link copied to clipboard!');
+        } catch (err) {
+          console.log('Clipboard copy failed');
+        }
+      } else {
+        showToast('Failed to create share link: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Error creating share link:', error);
+      showToast('Error creating share link');
+    }
+  }
+
+  // ===== DOWNLOAD FUNCTIONALITY =====
   function downloadChat() {
     const nodes = document.querySelectorAll('.message');
     if (!nodes.length) { showToast('No messages to download!'); return; }
@@ -101,7 +243,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         html,
-        thread_id: state.currentThreadId // ADDED: Include thread ID in PDF request
+        thread_id: state.currentThreadId
       })
     })
       .then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e)); return r.blob(); })
@@ -123,28 +265,31 @@
       });
   }
 
-  // Modals
+  // ===== MODAL FUNCTIONS =====
   window.closeModal = function(id) {
     const m = $(id);
     if (m) m.classList.remove('active');
   };
+  
   window.copyShareLink = function() {
     const input = $('shareLink');
     if (input && navigator.clipboard) {
       input.select?.();
       navigator.clipboard.writeText(input.value)
-        .then(() => { showToast('Share link copied to clipboard!'); window.closeModal('shareModal'); })
+        .then(() => { 
+          showToast('Share link copied to clipboard!'); 
+          window.closeModal('shareModal'); 
+        })
         .catch(() => showToast('Failed to copy share link'));
     }
   };
 
-  // Global click to close overlays and video modal backdrop
+  // ===== EVENT LISTENERS =====
   document.addEventListener('click', (e) => {
     if (e.target.classList?.contains('modal-overlay')) e.target.classList.remove('active');
     if (e.target.classList?.contains('video-modal')) window.closeVideoModal?.();
   });
 
-  // Event bindings
   sendButton?.addEventListener('click', () => window.sendMessage());
   chatInput?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -153,12 +298,7 @@
     }
   });
   
-  // FIXED: Share button now updates link before opening modal
-  shareBtn?.addEventListener('click', () => {
-    updateShareLink();
-    $('shareModal')?.classList.add('active');
-  });
-  
+  shareBtn?.addEventListener('click', shareCurrentChat);
   downloadBtn?.addEventListener('click', downloadChat);
   clearSavedBtn?.addEventListener('click', () => {
     state.savedMessages.clear();
@@ -167,11 +307,14 @@
     showToast('All saved messages cleared!');
   });
 
-  // Init
+  // ===== INITIALIZATION =====
   saved.loadSavedMessages?.();
   if (state.serverUser?.is_authenticated) chatInput?.focus();
 
-  // Cleanup
+  // Initialize shared chat functionality
+  SharedChat.init();
+
+  // ===== CLEANUP =====
   window.addEventListener('beforeunload', () => {
     stopPeriodicAuthCheck?.();
   });
