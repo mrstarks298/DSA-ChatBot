@@ -117,10 +117,14 @@ def classify_query_with_groq(user_query: str) -> dict:
     if not user_query or not user_query.strip():
         logger.warning("Empty query provided")
         return classify_query_fallback("")
-        
-    api_key = current_app.config.get("GROQ_API_KEY")
-    if not api_key:
-        logger.warning("No Groq API key, using fallback")
+    
+    try:
+        api_key = current_app.config.get("GROQ_API_KEY")
+        if not api_key:
+            logger.warning("No Groq API key configured, using fallback classification")
+            return classify_query_fallback(user_query)
+    except Exception as e:
+        logger.warning(f"Error accessing config, using fallback: {e}")
         return classify_query_fallback(user_query)
     
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -152,7 +156,19 @@ Respond with ONLY valid JSON in this format:
     }
     
     try:
-        res = requests.post(current_app.config["GROQ_CHAT_API_URL"], headers=headers, json=payload, timeout=10)
+        # Check if we have the API key
+        if not api_key:
+            logger.warning("No Groq API key available, using fallback")
+            return classify_query_fallback(user_query)
+            
+        # Check if we have the API URL
+        api_url = current_app.config.get("GROQ_CHAT_API_URL")
+        if not api_url:
+            logger.warning("No Groq API URL configured, using fallback")
+            return classify_query_fallback(user_query)
+        
+        logger.info(f"🔍 Calling Groq API for query classification: '{user_query[:50]}...'")
+        res = requests.post(api_url, headers=headers, json=payload, timeout=15)
         res.raise_for_status()
         
         response_json = res.json()
@@ -164,7 +180,8 @@ Respond with ONLY valid JSON in this format:
         elif isinstance(choices, dict):
             content = choices.get("message", {}).get("content", "").strip()
         else:
-            raise ValueError(f"Unexpected choices format: {type(choices)}")
+            logger.error(f"Unexpected choices format: {type(choices)}")
+            return classify_query_fallback(user_query)
         
         # Clean up response
         if content.startswith("```json"):
@@ -267,8 +284,18 @@ Return as JSON:
     }
     
     try:
+        # Check if we have the API key and URL
+        if not api_key:
+            logger.warning("No Groq API key available for question generation")
+            return _generate_fallback_questions(topic, difficulty, count)
+            
+        api_url = current_app.config.get("GROQ_CHAT_API_URL")
+        if not api_url:
+            logger.warning("No Groq API URL configured for question generation")
+            return _generate_fallback_questions(topic, difficulty, count)
+        
         logger.info(f"🚀 Calling Groq API for {topic} questions...")
-        res = requests.post(current_app.config["GROQ_CHAT_API_URL"], headers=headers, json=payload, timeout=20)
+        res = requests.post(api_url, headers=headers, json=payload, timeout=25)
         res.raise_for_status()
         
         response_json = res.json()

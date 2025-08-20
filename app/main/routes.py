@@ -498,7 +498,36 @@ def get_user_thread_list():
         return jsonify({'error': 'Failed to load threads'}), 500
 
 # Your existing routes remain the same
-# Debug routes removed for production security
+# Debug routes for development only
+@bp.route("/debug-groq", methods=["GET"])
+def debug_groq():
+    """Debug endpoint to test Groq API functionality"""
+    try:
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required'}), 401
+            
+        from ..services.intent import classify_query_with_groq, generate_dsa_questions_with_groq
+        
+        # Test query classification
+        test_query = "Explain binary search algorithm"
+        classification = classify_query_with_groq(test_query)
+        
+        # Test question generation
+        questions = generate_dsa_questions_with_groq("array", "easy", 2)
+        
+        debug_info = {
+            "groq_api_key": "SET" if current_app.config.get("GROQ_API_KEY") else "NOT SET",
+            "groq_api_url": current_app.config.get("GROQ_CHAT_API_URL"),
+            "test_classification": classification,
+            "test_questions": questions,
+            "config_validation": "PASSED" if current_app.config.get("GROQ_API_KEY") else "FAILED"
+        }
+        
+        return jsonify(debug_info)
+        
+    except Exception as e:
+        logger.exception("Debug Groq error")
+        return jsonify({"error": str(e)}), 500
 
 @bp.route("/videos/<topic>")
 def videos_topic(topic):

@@ -21,7 +21,7 @@ class BaseConfig:
     GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
     
-    # Validate required environment variables
+    # Validate required environment variables (warnings only, don't crash)
     @classmethod
     def validate_config(cls):
         required_vars = [
@@ -30,7 +30,9 @@ class BaseConfig:
         ]
         missing_vars = [var for var in required_vars if not getattr(cls, var)]
         if missing_vars:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+            print(f"⚠️  WARNING: Missing environment variables: {', '.join(missing_vars)}")
+            print("⚠️  Some features may not work properly without these variables.")
+        return True
     REDIRECT_URI = os.environ.get("REDIRECT_URI", "https://dsa-chatbot-3rll.onrender.com/oauth2callback")
 
     # API URLs
