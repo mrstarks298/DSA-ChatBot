@@ -957,6 +957,23 @@
       
       console.log('DSA Mentor Auth module loaded successfully');
       console.log('User authentication status:', AppState.serverUser?.is_authenticated);
+      
+      // Trigger shared thread loading if available
+      if (typeof window.loadSharedThread === 'function') {
+        const sharedThreadId = window.SHARED_THREAD_ID;
+        const pendingThread = sessionStorage.getItem('dsa_pending_thread');
+        
+        if (sharedThreadId && AppState.serverUser?.is_authenticated) {
+          console.log('Loading shared thread after auth init:', sharedThreadId);
+          window.loadSharedThread(sharedThreadId);
+        } else if (pendingThread && AppState.serverUser?.is_authenticated) {
+          console.log('Loading pending thread after auth init:', pendingThread);
+          sessionStorage.removeItem('dsa_pending_thread');
+          if (pendingThread.startsWith('thread_')) {
+            window.loadSharedThread(pendingThread);
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to initialize app-auth:', error);
       Utils.showToast('Initialization failed');

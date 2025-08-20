@@ -270,10 +270,11 @@
 
   // Handle shared thread loading
   document.addEventListener('DOMContentLoaded', function() {
-    // If there's a shared thread ID, use it
-    if (window.SHARED_THREAD_ID) {
-      setTimeout(() => {
-        if (window.app?.state) {
+    // Wait for JavaScript modules to be fully loaded
+    function waitForAppModules() {
+      if (window.app?.state && window.app?.render && window.app?.util) {
+        // If there's a shared thread ID, use it
+        if (window.SHARED_THREAD_ID) {
           window.app.state.currentThreadId = window.SHARED_THREAD_ID;
           window.app.util.updateShareLink();
           
@@ -282,34 +283,47 @@
             loadSharedThread(window.SHARED_THREAD_ID);
           }
         }
-      }, 100);
-    }
-    
-    // Restore thread after login
-    const pendingThread = sessionStorage.getItem('dsa_pending_thread');
-    if (pendingThread && window.SERVER_USER?.is_authenticated) {
-      sessionStorage.removeItem('dsa_pending_thread');
-      if (window.app?.state) {
-        window.app.state.currentThreadId = pendingThread;
-        window.app.util.updateShareLink();
         
-        // Load the shared thread content
-        if (pendingThread.startsWith('thread_')) {
-          loadSharedThread(pendingThread);
+        // Restore thread after login
+        const pendingThread = sessionStorage.getItem('dsa_pending_thread');
+        if (pendingThread && window.SERVER_USER?.is_authenticated) {
+          sessionStorage.removeItem('dsa_pending_thread');
+          window.app.state.currentThreadId = pendingThread;
+          window.app.util.updateShareLink();
+          
+          // Load the shared thread content
+          if (pendingThread.startsWith('thread_')) {
+            loadSharedThread(pendingThread);
+          }
         }
+      } else {
+        // Wait a bit more for modules to load
+        setTimeout(waitForAppModules, 200);
       }
     }
+    
+    // Start waiting for modules
+    waitForAppModules();
   });
 
-  // Optional: Function to load shared thread content
-  function loadSharedThread(threadId) {
+  // Global function to load shared thread content
+  window.loadSharedThread = function(threadId) {
     if (!window.SERVER_USER?.is_authenticated) {
       return; // User needs to login first
     }
 
+    console.log('Loading shared thread:', threadId);
+
     fetch(`/api/thread/${threadId}`)
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+      })
       .then(data => {
+        console.log('Shared thread data:', data);
+        
         if (data.messages && data.messages.length > 0) {
           // Hide welcome screen
           const welcomeScreen = document.getElementById('welcomeScreen');
@@ -317,9 +331,8 @@
             welcomeScreen.style.display = 'none';
           }
           
-          // Display messages
-          const chatContent = document.getElementById('chatContent');
-          if (chatContent && window.app?.render) {
+          // Display messages using the correct MessageRenderer
+          if (window.app?.render) {
             data.messages.forEach(msg => {
               if (msg.sender === 'user') {
                 window.app.render.addMessage('user', msg.content);
@@ -327,13 +340,33 @@
                 window.app.render.addBotResponse(msg.content);
               }
             });
+          } else {
+            console.error('MessageRenderer not available yet');
+            // Fallback: manually create message elements
+            const chatContent = document.getElementById('chatContent');
+            if (chatContent) {
+              data.messages.forEach(msg => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${msg.sender}-message`;
+                messageDiv.innerHTML = `
+                  <div class="message-content">
+                    <p>${msg.content}</p>
+                  </div>
+                `;
+                chatContent.appendChild(messageDiv);
+              });
+            }
           }
           
           window.app.util.showToast('📂 Shared thread loaded!');
+        } else {
+          console.log('No messages found in shared thread');
+          window.app.util.showToast('📝 No messages in this shared thread');
         }
       })
       .catch(error => {
         console.error('Error loading shared thread:', error);
+        window.app.util.showToast('❌ Failed to load shared thread: ' + error.message);
       });
   }
     function toggleSidebar() {
