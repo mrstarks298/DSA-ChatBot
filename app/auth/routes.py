@@ -162,7 +162,7 @@ def oauth2callback():
 
         logger.info(f"User {idinfo.get('email')} logged in successfully")
 
-        # FIXED: Redirect to the next URL (shared chat) after login
+        # IMPROVED: Better redirect handling for shared threads
         return render_template_string("""
         <script>
           // Clear any existing data
@@ -179,10 +179,19 @@ def oauth2callback():
           };
           localStorage.setItem('user_data', JSON.stringify(userData));
           
-          // Force page reload to update authentication state
-          setTimeout(() => {
-            window.location.href = "{{next_url}}";
-          }, 100);
+          // Check if we have a pending thread to restore
+          const pendingThread = sessionStorage.getItem('dsa_pending_thread');
+          if (pendingThread) {
+            // Redirect to the shared thread
+            const threadUrl = window.location.origin + '/chat/' + pendingThread;
+            sessionStorage.removeItem('dsa_pending_thread');
+            window.location.href = threadUrl;
+          } else {
+            // Redirect to the next URL or home
+            setTimeout(() => {
+              window.location.href = "{{next_url}}";
+            }, 100);
+          }
         </script>
         """, 
         name=idinfo.get('name', '').replace('"', '\\"'),

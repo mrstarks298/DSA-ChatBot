@@ -257,11 +257,15 @@
   
   function handleLogin() {
     // Store current thread ID before login redirect
-    const currentThreadId = window.app?.state?.currentThreadId;
+    const currentThreadId = window.app?.state?.currentThreadId || window.SHARED_THREAD_ID;
     if (currentThreadId) {
       sessionStorage.setItem('dsa_pending_thread', currentThreadId);
     }
-    window.location.href = '/login';
+    
+    // Redirect to login with next parameter for proper redirect after login
+    const currentUrl = window.location.href;
+    const loginUrl = currentUrl === window.location.origin + '/' ? '/login' : `/login?next=${encodeURIComponent(currentUrl)}`;
+    window.location.href = loginUrl;
   }
 
   // Handle shared thread loading
@@ -273,8 +277,10 @@
           window.app.state.currentThreadId = window.SHARED_THREAD_ID;
           window.app.util.updateShareLink();
           
-          // Optionally load the shared thread content
-          // loadSharedThread(window.SHARED_THREAD_ID);
+          // Load shared thread content if user is authenticated
+          if (window.SERVER_USER?.is_authenticated) {
+            loadSharedThread(window.SHARED_THREAD_ID);
+          }
         }
       }, 100);
     }
@@ -286,6 +292,11 @@
       if (window.app?.state) {
         window.app.state.currentThreadId = pendingThread;
         window.app.util.updateShareLink();
+        
+        // Load the shared thread content
+        if (pendingThread.startsWith('thread_')) {
+          loadSharedThread(pendingThread);
+        }
       }
     }
   });
