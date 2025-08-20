@@ -25,7 +25,3 @@ weasyprint==60.2
 
 # Production server
 gunicorn==21.2.0
-
-# Build dependencies (for Python 3.13 compatibility)
-setuptools>=65.0.0
-wheel>=0.38.0
