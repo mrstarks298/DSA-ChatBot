@@ -62,14 +62,25 @@
       
       if (user?.is_authenticated && user.name && user.email) {
         this.hideAuthOverlay();
+        this.hideSharedThreadBanner();
         this.updateUserProfile(user);
         this.enableChatInterface();
         this.startPeriodicAuthCheck();
         return true;
       }
       
-      this.showAuthOverlay();
-      this.disableChatInterface();
+      // Check if we're on a shared thread
+      const isSharedView = document.body.getAttribute('data-shared-view') === 'true';
+      const sharedThreadId = document.body.getAttribute('data-shared-thread-id');
+      
+      if (isSharedView && sharedThreadId && sharedThreadId !== 'null') {
+        this.showSharedThreadBanner();
+        this.disableChatInterface();
+      } else {
+        this.showAuthOverlay();
+        this.disableChatInterface();
+      }
+      
       this.stopPeriodicAuthCheck();
       return false;
     },
@@ -80,6 +91,14 @@
 
     hideAuthOverlay() {
       $('authOverlay')?.classList.remove('active');
+    },
+
+    showSharedThreadBanner() {
+      $('sharedThreadBanner')?.style.display = 'block';
+    },
+
+    hideSharedThreadBanner() {
+      $('sharedThreadBanner')?.style.display = 'none';
     },
 
     updateUserProfile(user) {
@@ -785,28 +804,42 @@
     const chatInput = $('chatInput');
     if (chatInput) {
       chatInput.value = question;
-      NetworkManager.sendMessage();
+      if (typeof window.sendMessage === 'function') {
+        window.sendMessage();
+      } else {
+        NetworkManager.sendMessage();
+      }
     }
   };
 
-  window.sendMessage = NetworkManager.sendMessage;
+  // Note: Streaming sender is defined in app-chat.js; do not override here
   window.openVideoModal = VideoModalHandler.openVideoModal.bind(VideoModalHandler);
   window.closeVideoModal = VideoModalHandler.closeVideoModal.bind(VideoModalHandler);
   window.removeSavedMessage = SavedMessagesManager.removeMessage.bind(SavedMessagesManager);
+  
+  // Share-link helper used by index.html share modal
+  window.copyShareLink = function() {
+    try {
+      const input = $('shareLink');
+      if (!input) return;
+      const value = input.value;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(() => Utils.showToast('🔗 Link copied!'));
+      } else {
+        input.select();
+        input.setSelectionRange(0, 99999);
+        document.execCommand('copy');
+        Utils.showToast('🔗 Link copied!');
+      }
+    } catch (e) {
+      console.error('Copy failed', e);
+      Utils.showToast('❌ Failed to copy');
+    }
+  };
 
   // ===== EVENT LISTENERS =====
   function setupEventListeners() {
-    // Send message events
-    const sendButton = $('sendButton');
-    const chatInput = $('chatInput');
-    
-    sendButton?.addEventListener('click', NetworkManager.sendMessage);
-    chatInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        NetworkManager.sendMessage();
-      }
-    });
+    // Send message events are handled by app-chat.js (streaming). Avoid duplicates here.
 
     // New thread
     const newThreadBtn = $('newThreadBtn');

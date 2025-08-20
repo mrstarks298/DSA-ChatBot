@@ -8,7 +8,15 @@ def best_text_for_query(query: str, text_df):
         return {"error": "No text content available"}
     try:
         qemb = get_embedding_from_api(query)
-        if qemb is None or len(qemb) != 384:
+        if qemb is None:
+            return {"error": "Query embedding generation failed or dimension mismatch"}
+        # Flatten possible nested shapes from HF router
+        if hasattr(qemb, 'ndim') and qemb.ndim > 1:
+            try:
+                qemb = qemb.flatten()
+            except Exception:
+                return {"error": "Query embedding format invalid"}
+        if len(qemb) != 384:
             return {"error": "Query embedding generation failed or dimension mismatch"}
 
         embs = np.vstack(text_df["embedding"].tolist())
@@ -28,7 +36,14 @@ def top_qa_for_query(query: str, qa_df, k: int = 5):
         return []
     try:
         qemb = get_embedding_from_api(query)
-        if qemb is None or len(qemb) != 384:
+        if qemb is None:
+            return []
+        if hasattr(qemb, 'ndim') and qemb.ndim > 1:
+            try:
+                qemb = qemb.flatten()
+            except Exception:
+                return []
+        if len(qemb) != 384:
             return []
         embs = np.vstack(qa_df["embedding"].tolist())
         sims = cosine_similarity([qemb], embs)[0]

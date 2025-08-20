@@ -56,6 +56,21 @@
       </div>
     </div>
 
+    <!-- Shared Thread Banner (shown when viewing shared thread without login) -->
+    <div class="shared-thread-banner" id="sharedThreadBanner" style="display: none;">
+      <div class="banner-content">
+        <div class="banner-icon">🔗</div>
+        <div class="banner-text">
+          <h3>Shared Thread</h3>
+          <p>You're viewing a shared conversation. Login to continue the discussion and save your own progress.</p>
+        </div>
+        <button class="banner-login-btn" onclick="handleLogin()">
+          <div class="google-icon"></div>
+          Login to Continue
+        </button>
+      </div>
+    </div>
+
     <!-- Authentication Overlay -->
     <div class="auth-overlay" id="authOverlay">
       <div class="auth-container">

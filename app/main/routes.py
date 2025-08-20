@@ -34,7 +34,25 @@ def get_current_user():
 @bp.route("/")
 def index():
     user_data = get_current_user()
-    return render_template("index.html", user=user_data)
+    return render_template("index.html", user=user_data, is_shared_view=False, shared_thread_id=None)
+
+@bp.route("/chat/<thread_id>")
+def shared_chat(thread_id):
+    """Render the chat UI in shared view mode with a preselected thread_id.
+
+    The frontend will use this to populate the share link and optionally load
+    messages if the user is authenticated.
+    """
+    user_data = get_current_user()
+    # Validate basic thread_id format
+    if not thread_id or not thread_id.startswith("thread_"):
+        thread_id = None
+    return render_template(
+        "index.html",
+        user=user_data,
+        is_shared_view=True,
+        shared_thread_id=thread_id,
+    )
 
 # ... thread helpers unchanged ...
 
@@ -49,7 +67,7 @@ def handle_query():
         thread_id = data.get('thread_id', '')
         if not raw_query:
             return jsonify({"error": "Missing query"}), 400
-        if thread_id and not thread_id.startswith('thread_'):
+        if thread_id and not (thread_id := thread_id).startswith('thread_'):
             return jsonify({'error': 'Invalid thread ID'}), 400
         if not thread_id:
             thread_id = f"thread_{str(uuid.uuid4())}"
@@ -142,7 +160,7 @@ def handle_query_stream():
     thread_id = data.get("thread_id") or f"thread_{str(uuid.uuid4())}"
     if not raw_query:
         return jsonify({"error":"Missing query"}), 400
-    if thread_id and not thread_id.startswith("thread_"):
+    if thread_id and not (thread_id := thread_id).startswith("thread_"):
         return jsonify({"error":"Invalid thread ID"}), 400
 
     user_id = get_current_user_id()
@@ -161,9 +179,10 @@ def handle_query_stream():
                 qa_df = fetch_qa_df()
                 best_content = best_text_for_query(cleaned, text_df)
                 summary = enhanced_summarize_with_context(best_content.get("content",""), ctx, raw_query)
+                summary_text = summary or "Based on your query about DSA concepts, here's the most relevant information."
 
                 # stream summary
-                yield _sse_event("chunk", json.dumps({"text": f"📝 Summary:\n{summary}\n\n"}))
+                yield _sse_event("chunk", json.dumps({"text": f"📝 Summary:\n{summary_text}\n\n"}))
 
                 # stream detailed content in paragraphs
                 detail = best_content.get("content", "") or ""
@@ -202,7 +221,7 @@ def handle_query_stream():
                         "content": best_content.get("content", "Content not found"),
                         "similarity": best_content.get("similarity", 0.0)
                     },
-                    "summary": summary or "Based on your query about DSA concepts, here's the most relevant information.",
+                    "summary": summary_text,
                     "top_dsa": top_qa if isinstance(top_qa, list) else [],
                     "video_suggestions": videos if isinstance(videos, list) else [],
                     "query_info": {
@@ -440,7 +459,7 @@ def debug_qa_detailed():
         }
         
         if res.data:
-            for i, row in enumerate(res.data[:3]):
+            for row in res.data[:3]:
                 embedding_data = row.get('embedding')
                 
                 from ..services.embeddings import _to_array

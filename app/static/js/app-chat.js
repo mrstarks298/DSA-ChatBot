@@ -739,36 +739,61 @@
       }
     },
 
-    downloadChat() {
+    async downloadChat() {
       const chatContent = $('chatContent');
       if (!chatContent) return;
 
-      const messages = chatContent.querySelectorAll('.message');
-      let chatText = 'DSA Mentor Chat Export\n';
-      chatText += '========================\n\n';
+      try {
+        const html = chatContent.innerHTML;
+        const payload = { html, thread_id: state?.currentThreadId || 'unknown' };
+        const res = await fetch('/generate-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
 
-      messages.forEach((message, index) => {
-        const isUser = message.classList.contains('user-message');
-        const sender = isUser ? 'You' : 'DSA Mentor';
-        const content = message.querySelector('.message-content');
-        
-        if (content) {
-          const text = content.innerText || content.textContent;
-          chatText += `${sender}:\n${text}\n\n`;
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `dsa-mentor-${state?.currentThreadId || 'chat'}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          showToast?.('📄 PDF downloaded!');
+          return;
         }
-      });
-
-      const blob = new Blob([chatText], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `dsa-chat-${new Date().toISOString().split('T')[0]}.txt`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      showToast?.('💾 Chat downloaded successfully!');
+        if (res.status === 401 || res.status === 403) {
+          showToast?.('Please login to download PDF');
+        }
+        throw new Error(`PDF generation failed (${res.status})`);
+      } catch (e) {
+        // Fallback to text export
+        const messages = chatContent.querySelectorAll('.message');
+        let chatText = 'DSA Mentor Chat Export\n';
+        chatText += '========================\n\n';
+        messages.forEach((message) => {
+          const isUser = message.classList.contains('user-message');
+          const sender = isUser ? 'You' : 'DSA Mentor';
+          const content = message.querySelector('.message-content');
+          if (content) {
+            const text = content.innerText || content.textContent;
+            chatText += `${sender}:\n${text}\n\n`;
+          }
+        });
+        const blob = new Blob([chatText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `dsa-chat-${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showToast?.('💾 Chat downloaded as text');
+      }
     },
 
     shareCurrentChat() {
@@ -814,14 +839,32 @@
       });
     }
 
-    // Download chat
+    // Download chat (PDF via backend with fallback)
     if (downloadBtn) {
       downloadBtn.addEventListener('click', ChatUtilities.downloadChat);
     }
 
-    // Share chat
+    // Share chat → open modal and populate link (fallback to native share)
     if (shareBtn) {
-      shareBtn.addEventListener('click', ChatUtilities.shareCurrentChat);
+      shareBtn.addEventListener('click', () => {
+        const shareModal = $('shareModal');
+        const shareLink = $('shareLink');
+        const url = `${window.location.origin}/chat/${state?.currentThreadId || ''}`;
+
+        if (navigator.share) {
+          navigator.share({
+            title: 'DSA Mentor Chat',
+            text: 'Check out my DSA learning session!',
+            url
+          }).catch(() => {
+            if (shareLink) shareLink.value = url;
+            shareModal?.classList.add('active');
+          });
+        } else {
+          if (shareLink) shareLink.value = url;
+          shareModal?.classList.add('active');
+        }
+      });
     }
 
     // Modal close events

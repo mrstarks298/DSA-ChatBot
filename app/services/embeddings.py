@@ -32,8 +32,21 @@ def get_embedding_from_api(text: str, use_backup=False, max_retries=3):
             response.raise_for_status()
             embedding = response.json()
             
-            logger.debug(f"Successfully got embedding using {'backup' if use_backup else 'primary'} token")
-            return np.array(embedding)
+            # Ensure we always return a 1D vector (length 384)
+            arr = np.array(embedding)
+            if arr.ndim == 2 and arr.shape[0] == 1:
+                arr = arr[0]
+            elif arr.ndim > 1:
+                arr = arr.flatten()
+
+            if hasattr(arr, 'dtype') and arr.dtype != np.float32:
+                arr = arr.astype(np.float32)
+
+            if len(arr) != 384:
+                logger.warning(f"Embedding dimension mismatch: got {len(arr)}")
+            
+            logger.debug(f"Successfully got embedding using {'backup' if use_backup else 'primary'} token; shape={arr.shape}")
+            return arr
             
         except requests.exceptions.Timeout as e:
             logger.warning(f"Timeout on attempt {attempt + 1} with {'backup' if use_backup else 'primary'} token: {e}")
