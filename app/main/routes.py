@@ -67,8 +67,12 @@ def handle_query():
         data = request.get_json() or {}
         raw_query = (data.get("query") or "").strip()
         thread_id = data.get('thread_id', '')
+        
         if not raw_query:
             return jsonify({"error": "Missing query"}), 400
+            
+        if not supabase:
+            return jsonify({"error": "Database not available"}), 500
         if thread_id and not (thread_id := thread_id).startswith('thread_'):
             return jsonify({'error': 'Invalid thread ID'}), 400
         if not thread_id:
@@ -160,8 +164,12 @@ def handle_query_stream():
     data = request.get_json() or {}
     raw_query = (data.get("query") or "").strip()
     thread_id = data.get("thread_id") or f"thread_{str(uuid.uuid4())}"
+    
     if not raw_query:
         return jsonify({"error":"Missing query"}), 400
+        
+    if not supabase:
+        return jsonify({"error": "Database not available"}), 500
     if thread_id and not (thread_id := thread_id).startswith("thread_"):
         return jsonify({"error":"Invalid thread ID"}), 400
 
@@ -278,6 +286,9 @@ def generate_pdf():
 
         if not html_content:
             return jsonify({"error":"Missing HTML content"}), 400
+            
+        if not html_content.strip():
+            return jsonify({"error":"Empty HTML content"}), 400
 
         html_content = html_content.replace('@import url(', '<!-- @import url(')
         pdf = generate_pdf_from_html(html_content)
@@ -292,6 +303,10 @@ def generate_pdf():
 
 def save_message(user_id, thread_id, sender, content):
     try:
+        if not supabase:
+            logger.error("Supabase client not initialized")
+            return None
+            
         # ensure JSON serializable
         stored = content
         if not isinstance(stored, (dict, list, str, int, float, type(None))):
@@ -314,6 +329,10 @@ def save_message(user_id, thread_id, sender, content):
 def load_chat_thread(user_id, thread_id):
     """Load a chat thread from Supabase database"""
     try:
+        if not supabase:
+            logger.error("Supabase client not initialized")
+            return []
+            
         result = supabase.table('chat_messages')\
             .select('*')\
             .eq('user_id', user_id)\
@@ -330,6 +349,10 @@ def load_chat_thread(user_id, thread_id):
 def get_user_threads(user_id):
     """Get all thread IDs for a user from Supabase with better performance"""
     try:
+        if not supabase:
+            logger.error("Supabase client not initialized")
+            return []
+            
         # Get distinct thread_ids with their latest timestamp
         result = supabase.table('chat_messages')\
             .select('thread_id, timestamp')\
@@ -354,6 +377,16 @@ def get_user_threads(user_id):
 def get_thread_summary(user_id, thread_id):
     """Get thread summary for display in thread list"""
     try:
+        if not supabase:
+            logger.error("Supabase client not initialized")
+            return {
+                'thread_id': thread_id,
+                'created_at': None,
+                'updated_at': None,
+                'message_count': 0,
+                'preview': 'Error loading preview'
+            }
+            
         # Get first user message for preview
         first_msg = supabase.table('chat_messages')\
             .select('content, timestamp')\
@@ -413,6 +446,9 @@ def get_thread(thread_id):
         if not is_authenticated():
             return jsonify({'error': 'Authentication required'}), 401
             
+        if not thread_id or not thread_id.strip():
+            return jsonify({'error': 'Invalid thread ID'}), 400
+            
         user_id = get_current_user_id()
         messages = load_chat_thread(user_id, thread_id)
         
@@ -452,6 +488,9 @@ def get_user_thread_list():
 @bp.route("/debug-qa-detailed")  
 def debug_qa_detailed():
     try:
+        if not supabase:
+            return jsonify({"error": "Database not available"}), 500
+            
         res = supabase.table("qa1_resources").select("*").limit(10).execute()
         
         debug_info = {
@@ -490,6 +529,9 @@ def debug_qa_detailed():
 
 @bp.route("/videos/<topic>")
 def videos_topic(topic):
+    if not topic or not topic.strip():
+        return jsonify({"error": "Invalid topic"}), 400
+        
     vids = get_videos(topic, limit=5)
     if not vids:
         general = get_videos("introduction", limit=3)
@@ -501,8 +543,12 @@ def videos_search():
     q = (request.args.get("q") or "").strip()
     difficulty = (request.args.get("difficulty") or "").strip()
     limit = int(request.args.get("limit", 10))
+    
     if not q:
         return jsonify({"error":"Missing search query"}), 400
+        
+    if limit <= 0 or limit > 50:
+        return jsonify({"error":"Invalid limit parameter"}), 400
     vids = get_videos(q, limit=limit)
     if difficulty:
         vids = [v for v in vids if v.get("difficulty") == difficulty]
@@ -510,12 +556,19 @@ def videos_search():
 
 @bp.route("/test-videos")
 def test_videos():
-    vids = get_videos("algorithm", limit=3)
-    return jsonify({"status":"success","video_count": len(vids),"sample_videos": vids[:2] if vids else []})
+    try:
+        vids = get_videos("algorithm", limit=3)
+        return jsonify({"status":"success","video_count": len(vids),"sample_videos": vids[:2] if vids else []})
+    except Exception as e:
+        logger.error(f"Test videos error: {e}")
+        return jsonify({"status":"error","error": str(e)}), 500
 
 @bp.route("/debug-embeddings")
 def debug_embeddings():
     try:
+        if not supabase:
+            return jsonify({"status":"error","error": "Database not available"}), 500
+            
         res = supabase.table("text_embeddings").select("id, embedding::text").limit(2).execute()
         return jsonify({"status":"success","raw_data_sample": res.data[:1] if res.data else [], "total_records": len(res.data or [])})
     except Exception as e:

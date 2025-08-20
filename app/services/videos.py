@@ -3,7 +3,7 @@ from typing import List, Dict, Optional
 from ..extensions import supabase, logger
 
 def extract_youtube_id(url: str) -> Optional[str]:
-    if not url or url == '#':
+    if not url or not isinstance(url, str) or url == '#':
         return None
     url = url.strip()
     patterns = [
@@ -22,6 +22,10 @@ def extract_youtube_id(url: str) -> Optional[str]:
 def get_videos(topic: str, limit: int = 5) -> List[Dict]:
     if not topic or not topic.strip():
         logger.warning("Empty topic provided to get_videos")
+        return []
+
+    if not supabase:
+        logger.error("Supabase client not initialized")
         return []
 
     try:

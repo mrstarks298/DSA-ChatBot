@@ -20,7 +20,7 @@ DSA_TOPICS = {
 class QueryProcessor:
     @staticmethod
     def clean_and_normalize_query(query: str) -> str:
-        if not query:
+        if not query or not isinstance(query, str):
             return ""
         query = re.sub(r'\s+', ' ', query.strip())
         normalized = re.sub(r'[^\w\s?!.+\-]', '', query.lower())
@@ -41,6 +41,16 @@ class QueryProcessor:
 
     @staticmethod
     def extract_dsa_context(query: str) -> dict:
+        if not query or not isinstance(query, str):
+            return {
+                'topics': [],
+                'complexity_asked': False,
+                'implementation_asked': False,
+                'example_asked': False,
+                'comparison_asked': False,
+                'question_generation_asked': False
+            }
+            
         normalized = query.lower()
         ctx = {
             'topics': [],
@@ -67,6 +77,9 @@ class QueryProcessor:
 
 def classify_query_fallback(query: str) -> dict:
     """Enhanced fallback with better DSA detection"""
+    if not query or not isinstance(query, str):
+        return {"type": "vague_question", "confidence": 0.5, "is_dsa": False, "reasoning": "fallback empty query"}
+        
     q = query.lower().strip()
     
     # Greeting patterns
@@ -101,9 +114,13 @@ def classify_query_fallback(query: str) -> dict:
 
 def classify_query_with_groq(user_query: str) -> dict:
     """Fixed Groq API call with proper response parsing"""
+    if not user_query or not user_query.strip():
+        logger.warning("Empty query provided")
+        return classify_query_fallback("")
+        
     api_key = current_app.config.get("GROQ_API_KEY")
-    if not api_key or not user_query:
-        logger.warning("No Groq API key or empty query, using fallback")
+    if not api_key:
+        logger.warning("No Groq API key, using fallback")
         return classify_query_fallback(user_query)
     
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -186,6 +203,14 @@ Respond with ONLY valid JSON in this format:
 
 def generate_dsa_questions_with_groq(topic: str, difficulty: str = 'medium', count: int = 3) -> dict:
     """Generate DSA questions with answers using Groq API"""
+    if not topic or not topic.strip():
+        logger.warning("Empty topic provided for question generation")
+        return {"questions": [], "error": "Topic is required"}
+        
+    if count <= 0 or count > 10:
+        logger.warning(f"Invalid count parameter: {count}")
+        count = 3
+        
     api_key = current_app.config.get("GROQ_API_KEY")
     if not api_key:
         logger.warning("No Groq API key for question generation")
@@ -304,6 +329,10 @@ Return as JSON:
 
 def _extract_questions_from_text(content: str, topic: str, difficulty: str) -> dict:
     """Extract questions from non-JSON Groq response"""
+    if not content or not isinstance(content, str):
+        logger.warning("Empty or invalid content provided for text extraction")
+        return {"questions": []}
+        
     logger.info("🔧 Attempting to extract questions from text response...")
     
     # Simple extraction - look for common patterns
@@ -358,94 +387,19 @@ def _generate_fallback_questions(topic: str, difficulty: str, count: int) -> dic
         }]
     }
 
-def generate_dsa_questions_with_groq(topic: str, difficulty: str = 'medium', count: int = 3) -> dict:
-    """Generate DSA questions with answers using Groq API"""
-    api_key = current_app.config.get("GROQ_API_KEY")
-    if not api_key:
-        logger.warning("No Groq API key for question generation")
-        return {"questions": [], "error": "API key not available"}
-    
-    # Map common topics to more specific ones
-    topic_mapping = {
-        'array': 'Arrays and Array Manipulation',
-        'linked_list': 'Linked Lists',
-        'stack': 'Stack Data Structure', 
-        'queue': 'Queue Data Structure',
-        'tree': 'Binary Trees and Tree Traversal',
-        'graph': 'Graph Algorithms and Traversal',
-        'sorting': 'Sorting Algorithms',
-        'searching': 'Searching Algorithms',
-        'dynamic_programming': 'Dynamic Programming',
-        'recursion': 'Recursion and Backtracking'
-    }
-    
-    formatted_topic = topic_mapping.get(topic.lower(), topic)
-    
-    # FIXED: More focused system prompt for better JSON response
-    system_prompt = f"""You are a DSA expert. Generate {count} {difficulty} level questions about {formatted_topic}.
 
-Respond with ONLY valid JSON in this exact format:
-{{
-  "questions": [
-    {{
-      "id": 1,
-      "question": "Clear problem statement",
-      "examples": "Input: [1,2,3] Output: 6",
-      "solution": "Step by step explanation",
-      "code": "def solution(arr):\\n    return sum(arr)",
-      "time_complexity": "O(n)",
-      "space_complexity": "O(1)",
-      "difficulty": "{difficulty}",
-      "topic": "{formatted_topic}"
-    }}
-  ]
-}}"""
-
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    payload = {
-        "model": "llama3-70b-8192",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Generate {count} {difficulty} questions about {formatted_topic}. Return valid JSON only."}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 2000
-    }
-    
-    try:
-        res = requests.post(current_app.config["GROQ_CHAT_API_URL"], headers=headers, json=payload, timeout=20)
-        res.raise_for_status()
-        
-        response_json = res.json()
-        choices = response_json.get("choices")
-        if isinstance(choices, list) and len(choices) > 0:
-            content = choices[0].get("message", {}).get("content", "")
-        elif isinstance(choices, dict):
-            content = choices.get("message", {}).get("content", "")
-        else:
-            raise ValueError(f"Unexpected choices format: {type(choices)}")
-        
-        # Clean up JSON response
-        content = content.strip()
-        if content.startswith("```json"):
-            content = content[7:-3]
-        elif content.startswith("```"):
-            content = content[3:-3]
-        
-        try:
-            questions_data = json.loads(content)
-            logger.info(f"Generated {len(questions_data.get('questions', []))} questions for {topic}")
-            return questions_data
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error in question generation: {e}")
-            return _generate_fallback_questions(topic, difficulty, count)
-            
-    except Exception as e:
-        logger.error(f"Question generation error: {e}")
-        return _generate_fallback_questions(topic, difficulty, count)
 
 def _generate_fallback_questions(topic: str, difficulty: str, count: int) -> dict:
     """Generate basic questions when API fails - ENHANCED for better display"""
+    if not topic or not isinstance(topic, str):
+        topic = "general"
+        
+    if not difficulty or not isinstance(difficulty, str):
+        difficulty = "medium"
+        
+    if not isinstance(count, int) or count <= 0:
+        count = 1
+        
     basic_questions = {
         'array': {
             'question': 'Find the maximum element in an array',
@@ -514,6 +468,10 @@ def _generate_fallback_questions(topic: str, difficulty: str, count: int) -> dic
 
 def answer_dsa_question_with_groq(question: str, context: str = "") -> dict:
     """Answer DSA questions directly using Groq API"""
+    if not question or not question.strip():
+        logger.warning("Empty question provided")
+        return {"answer": "Question is required", "error": True}
+        
     api_key = current_app.config.get("GROQ_API_KEY")
     if not api_key:
         logger.warning("No Groq API key for question answering")
@@ -575,6 +533,14 @@ Be detailed but concise. Focus on helping the student understand the concept tho
         }
 
 def generate_response_by_intent(classification: dict, original_query: str) -> dict | None:
+    if not classification:
+        logger.warning("No classification provided")
+        return None
+        
+    if not original_query or not original_query.strip():
+        logger.warning("No original query provided")
+        return None
+        
     base = {"top_dsa": [], "video_suggestions": []}
     t = classification.get("type", "general")
     
@@ -708,8 +674,17 @@ def generate_response_by_intent(classification: dict, original_query: str) -> di
     return None
 
 def enhanced_summarize_with_context(text: str, ctx: dict, original_query: str) -> str | None:
+    if not text or not text.strip():
+        logger.warning("Empty text provided for summarization")
+        return None
+        
+    if not ctx:
+        logger.warning("No context provided for summarization")
+        return None
+        
     api_key = current_app.config.get("GROQ_API_KEY")
-    if not api_key or not text:
+    if not api_key:
+        logger.warning("No Groq API key for summarization")
         return None
     
     prompt = "You are a helpful DSA tutor. "

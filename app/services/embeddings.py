@@ -13,6 +13,10 @@ HF_API_TOKEN_BACKUP = os.getenv("HF_API_TOKEN_BACKUP")
 
 def get_embedding_from_api(text: str, use_backup=False, max_retries=3):
     """Get embedding vector from Hugging Face Inference API with backup and retry logic."""
+    if not text or not text.strip():
+        logger.warning("Empty text provided for embedding")
+        return None
+        
     # Choose token
     token = HF_API_TOKEN_BACKUP if use_backup else HF_API_TOKEN
     

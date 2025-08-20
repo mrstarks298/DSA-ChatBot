@@ -8,6 +8,9 @@ from io import BytesIO
 
 def extract_text_from_html(html_content: str) -> list:
     """Extract text content from HTML for PDF generation"""
+    if not html_content or not isinstance(html_content, str):
+        return []
+        
     # Remove HTML tags and extract text
     text_content = []
     
@@ -25,6 +28,12 @@ def extract_text_from_html(html_content: str) -> list:
 
 def generate_pdf_from_html(html_content: str) -> bytes:
     """Generate PDF from HTML content using ReportLab"""
+    if not html_content or not isinstance(html_content, str):
+        raise ValueError("Invalid HTML content provided")
+        
+    if not html_content.strip():
+        raise ValueError("Empty HTML content provided")
+        
     # Create PDF in memory
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)

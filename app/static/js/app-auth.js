@@ -849,9 +849,11 @@
     const chatInput = $('chatInput');
     if (chatInput) {
       chatInput.value = question;
+      // Use the global sendMessage function from app-chat.js
       if (typeof window.sendMessage === 'function') {
         window.sendMessage();
       } else {
+        // Fallback to NetworkManager if sendMessage is not available
         NetworkManager.sendMessage();
       }
     }

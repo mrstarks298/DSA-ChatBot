@@ -4,6 +4,9 @@ from .embeddings import get_embedding_from_api  # import the API embedding funct
 from ..extensions import logger
 
 def best_text_for_query(query: str, text_df):
+    if not query or not query.strip():
+        return {"error": "Empty query provided"}
+        
     if text_df.empty:
         return {"error": "No text content available"}
     try:
@@ -32,6 +35,9 @@ def best_text_for_query(query: str, text_df):
         return {"error": str(e)}
 
 def top_qa_for_query(query: str, qa_df, k: int = 5):
+    if not query or not query.strip():
+        return []
+        
     if qa_df.empty:
         return []
     try:
