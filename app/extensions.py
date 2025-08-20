@@ -12,16 +12,9 @@ load_dotenv()  # load .env variables
 
 logger = logging.getLogger("dsa-mentor")
 
-# Initialize immediately instead of waiting for init_extensions
-url = "https://tsuwpbunvavtygtnsypm.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdXdwYnVudmF2dHlndG5zeXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ4MTkyODIsImV4cCI6MjA3MDM5NTI4Mn0.oUl9B1cZWWu4uE4m5fKdkmlpXN3Gqe9Cj6Gsc4rJJ8g"
-
-
-# url = os.environ.get("SUPABASE_URL", url)
-# key = os.environ.get("SUPABASE_KEY", key)
-
-# url = os.getenv("SUPABASE_URL")
-# key = os.getenv("SUPABASE_KEY")
+# Get Supabase credentials from environment variables
+url = os.environ.get("SUPABASE_URL", "https://tsuwpbunvavtygtnsypm.supabase.co")
+key = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdXdwYnVudmF2dHlndG5zeXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ4MTkyODIsImV4cCI6MjA3MDM5NTI4Mn0.oUl9B1cZWWu4uE4m5fKdkmlpXN3Gqe9Cj6Gsc4rJJ8g")
 
 print(f"DEBUG: Initializing Supabase with URL: {url}")
 print(f"DEBUG: Supabase key is set: {bool(key)}")

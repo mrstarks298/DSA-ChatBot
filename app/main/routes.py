@@ -34,6 +34,7 @@ def get_current_user():
 @bp.route("/")
 def index():
     user_data = get_current_user()
+    logger.info(f"Index route accessed - User authenticated: {user_data['is_authenticated']}, Name: {user_data.get('name', 'N/A')}")
     return render_template("index.html", user=user_data, is_shared_view=False, shared_thread_id=None)
 
 @bp.route("/chat/<thread_id>")
@@ -44,6 +45,7 @@ def shared_chat(thread_id):
     messages if the user is authenticated.
     """
     user_data = get_current_user()
+    logger.info(f"Shared chat route accessed - Thread: {thread_id}, User authenticated: {user_data['is_authenticated']}")
     # Validate basic thread_id format
     if not thread_id or not thread_id.startswith("thread_"):
         thread_id = None

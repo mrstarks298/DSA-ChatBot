@@ -55,6 +55,29 @@
     serverUser: window.SERVER_USER || { is_authenticated: false }
   };
 
+  // Check for stored user data on initialization
+  function initializeUserFromStorage() {
+    try {
+      const storedUser = localStorage.getItem('user_data');
+      if (storedUser) {
+        const userData = JSON.parse(storedUser);
+        if (userData.authenticated && userData.name && userData.email) {
+          // Update server user data if not already set
+          if (!AppState.serverUser.is_authenticated) {
+            AppState.serverUser = {
+              is_authenticated: true,
+              name: userData.name,
+              email: userData.email,
+              picture: userData.picture
+            };
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading user data from storage:', error);
+    }
+  }
+
   // ===== AUTHENTICATION MANAGER =====
   const AuthManager = {
     checkAuthentication() {
@@ -160,6 +183,7 @@
         const nowAuthenticated = data.is_authenticated;
         
         if (wasAuthenticated !== nowAuthenticated) {
+          console.log('Authentication status changed:', { was: wasAuthenticated, now: nowAuthenticated });
           this.notifyAuthChange();
           location.reload();
           return;
@@ -169,11 +193,32 @@
             AppState.serverUser?.id && 
             data.user_id && 
             AppState.serverUser.id !== data.user_id) {
+          console.log('User ID changed, reloading...');
           this.notifyAuthChange();
           location.reload();
         }
       } catch (error) {
         console.error('Auth check failed:', error);
+      }
+    },
+
+    // Force authentication check on page load
+    async forceAuthCheck() {
+      try {
+        const response = await fetch('/auth-status');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.is_authenticated) {
+            // Update server user data
+            AppState.serverUser = {
+              is_authenticated: true,
+              id: data.user_id
+            };
+            this.checkAuthentication();
+          }
+        }
+      } catch (error) {
+        console.error('Force auth check failed:', error);
       }
     },
 
@@ -887,10 +932,17 @@
   window.app.video = VideoModalHandler;
 
   // ===== INITIALIZATION =====
-  function initialize() {
+  async function initialize() {
     try {
+      // Initialize user data from storage first
+      initializeUserFromStorage();
+      
       ThemeManager.init();
       setupEventListeners();
+      
+      // Force authentication check with server
+      await AuthManager.forceAuthCheck();
+      
       AuthManager.checkAuthentication();
       SavedMessagesManager.loadSavedMessages();
       Utils.updateShareLink(AppState.currentThreadId);
@@ -900,6 +952,7 @@
       }
       
       console.log('DSA Mentor Auth module loaded successfully');
+      console.log('User authentication status:', AppState.serverUser?.is_authenticated);
     } catch (error) {
       console.error('Failed to initialize app-auth:', error);
       Utils.showToast('Initialization failed');

@@ -142,6 +142,11 @@ def oauth2callback():
         # FIXED: Redirect to the next URL (shared chat) after login
         return render_template_string("""
         <script>
+          // Clear any existing data
+          localStorage.removeItem('user_data');
+          sessionStorage.removeItem('auth_change');
+          
+          // Set user data
           const userData = {
             authenticated: true, 
             name: "{{name}}", 
@@ -150,7 +155,8 @@ def oauth2callback():
             loginTime: {{login}}
           };
           localStorage.setItem('user_data', JSON.stringify(userData));
-          // Redirect to the shared chat or home page
+          
+          // Force page reload to update authentication state
           setTimeout(() => {
             window.location.href = "{{next_url}}";
           }, 100);
