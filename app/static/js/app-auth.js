@@ -163,9 +163,10 @@
         clearInterval(AppState.authCheckInterval);
       }
       
+      // Only check auth every 5 minutes instead of 30 seconds to prevent excessive reloads
       AppState.authCheckInterval = setInterval(() => {
         this.performAuthCheck();
-      }, 30000);
+      }, 300000); // 5 minutes
     },
 
     stopPeriodicAuthCheck() {
@@ -176,6 +177,14 @@
     },
 
     async performAuthCheck() {
+      // Prevent rapid successive auth checks
+      if (this.isCheckingAuth) {
+        console.log('Auth check already in progress, skipping...');
+        return;
+      }
+      
+      this.isCheckingAuth = true;
+      
       try {
         const response = await fetch('/auth-status');
         if (!response.ok) return;
@@ -187,7 +196,16 @@
         if (wasAuthenticated !== nowAuthenticated) {
           console.log('Authentication status changed:', { was: wasAuthenticated, now: nowAuthenticated });
           this.notifyAuthChange();
+          
+                  // Only reload if user actually logged out (not just status change)
+        if (!nowAuthenticated) {
+          console.log('User logged out, reloading page...');
           location.reload();
+        } else {
+          // Update state without reload for login
+          console.log('User logged in, updating state without reload...');
+          AppState.serverUser = data;
+        }
           return;
         }
         
@@ -195,12 +213,15 @@
             AppState.serverUser?.id && 
             data.user_id && 
             AppState.serverUser.id !== data.user_id) {
-          console.log('User ID changed, reloading...');
-          this.notifyAuthChange();
-          location.reload();
+          console.log('User ID changed, updating state...');
+          // Update state instead of reloading
+          AppState.serverUser = data;
         }
       } catch (error) {
         console.error('Auth check failed:', error);
+      } finally {
+        // Reset the flag after auth check completes
+        this.isCheckingAuth = false;
       }
     },
 
@@ -226,8 +247,14 @@
 
     notifyAuthChange() {
       try {
-        localStorage.setItem('auth_change', String(Date.now()));
-        localStorage.removeItem('auth_change');
+        // Update auth state without triggering reloads
+        const timestamp = String(Date.now());
+        localStorage.setItem('auth_change', timestamp);
+        
+        // Remove the key after a short delay to prevent storage events
+        setTimeout(() => {
+          localStorage.removeItem('auth_change');
+        }, 100);
       } catch (error) {
         console.error('Failed to notify auth change:', error);
       }
@@ -913,10 +940,12 @@
       }
     });
 
-    // Storage change listener for auth sync
+    // Storage change listener for auth sync - removed auto-reload to prevent infinite loops
     window.addEventListener('storage', (e) => {
       if (e.key === 'auth_change') {
-        setTimeout(() => location.reload(), 1000);
+        // Just update the auth state without reloading
+        console.log('Auth change detected, updating state...');
+        AuthManager.checkAuthentication();
       }
     });
 
