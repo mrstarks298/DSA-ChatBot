@@ -1,60 +1,86 @@
-from weasyprint import HTML, CSS
-from weasyprint.text.fonts import FontConfiguration
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor
 import re
+from io import BytesIO
 
-PDF_CSS = """
-body {
-    font-family: 'Inter', Arial, sans-serif;
-    font-size: 14px;
-    color: #1F2937;
-}
-
-.concept-title {
-    font-size: 22px;
-    font-weight: 700;
-    color: #1B7EFE;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 3px solid #E5E7EB;
-}
-
-.concept-explanation {
-    font-size: 15px;
-    line-height: 1.8;
-    color: #4B5563;
-    margin-bottom: 20px;
-}
-
-.video-card {
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    padding: 12px;
-    margin: 8px 0;
-}
-
-.video-card:hover {
-    background-color: #F9FAFB;
-}
-"""
-
-def process_html_for_pdf(html_content: str) -> str:
-    # Convert video cards with onclick to clickable links
-    # Matches: <div class="video-card" onclick="openVideoModal('URL', 'TITLE')" ...>INNER</div>
-    pattern = re.compile(
-        r'<div\s+class="video-card"[^>]*onclick="openVideoModal\s*\'([^\']+)\'[^"]*"[^>]*>(.*?)</div>',
-        re.IGNORECASE | re.DOTALL
-    )
+def extract_text_from_html(html_content: str) -> list:
+    """Extract text content from HTML for PDF generation"""
+    # Remove HTML tags and extract text
+    text_content = []
     
-    def repl(m):
-        url = m.group(1)
-        inner = m.group(2)
-        return f'<a href="{url}" target="_blank" style="display:block;text-decoration:none;color:inherit;">{inner}</a>'
+    # Split by message divs
+    messages = re.findall(r'<div class="message ([^"]*)-message">(.*?)</div>', html_content, re.DOTALL)
     
-    return pattern.sub(repl, html_content)
+    for msg_type, content in messages:
+        # Extract text from message content
+        text = re.sub(r'<[^>]+>', '', content)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if text:
+            text_content.append((msg_type, text))
+    
+    return text_content
 
 def generate_pdf_from_html(html_content: str) -> bytes:
-    processed_html = process_html_for_pdf(html_content)
-    font_config = FontConfiguration()
-    html = HTML(string=f"<!doctype html><html><body>{processed_html}</body></html>")
-    css = CSS(string=PDF_CSS, font_config=font_config)
-    return html.write_pdf(stylesheets=[css], font_config=font_config)
+    """Generate PDF from HTML content using ReportLab"""
+    # Create PDF in memory
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    
+    # Create custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=20,
+        textColor=HexColor('#1B7EFE'),
+        alignment=1  # Center
+    )
+    
+    user_style = ParagraphStyle(
+        'UserMessage',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=12,
+        leftIndent=20,
+        textColor=HexColor('#1F2937'),
+        backColor=HexColor('#E5E7EB')
+    )
+    
+    bot_style = ParagraphStyle(
+        'BotMessage',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=12,
+        leftIndent=20,
+        textColor=HexColor('#1F2937')
+    )
+    
+    # Build PDF content
+    story = []
+    
+    # Add title
+    story.append(Paragraph("DSA Mentor Chat Export", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Extract and add messages
+    messages = extract_text_from_html(html_content)
+    
+    for msg_type, text in messages:
+        if msg_type == 'user':
+            story.append(Paragraph(f"<b>You:</b> {text}", user_style))
+        else:
+            story.append(Paragraph(f"<b>DSA Mentor:</b> {text}", bot_style))
+        story.append(Spacer(1, 10))
+    
+    # Build PDF
+    doc.build(story)
+    pdf_content = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_content
