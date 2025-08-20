@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-from flask import Flask
+from flask import Flask, request
 from .config import get_config
 from .extensions import init_extensions
 from .main import bp as main_bp
@@ -17,9 +17,13 @@ def create_app(config_name="development"):
 
     @app.after_request
     def add_cors_headers(response):
-        response.headers.add("Access-Control-Allow-Origin", "*")
+        # Only allow requests from your own domain in production
+        origin = request.headers.get('Origin')
+        if origin and (app.config.get('DEBUG') or origin.startswith('https://dsa-chatbot-3rll.onrender.com')):
+            response.headers.add("Access-Control-Allow-Origin", origin)
         response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
         response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
         return response
 
     return app

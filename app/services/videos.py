@@ -29,11 +29,14 @@ def get_videos(topic: str, limit: int = 5) -> List[Dict]:
         return []
 
     try:
+        # Sanitize topic to prevent injection
+        sanitized_topic = topic.strip().replace("'", "''").replace('"', '""')
+        
         query = (
             supabase.table("video_suggestions")
             .select("*")
             .or_(
-                f"topic.ilike.%{topic}%,title.ilike.%{topic}%,subtopic.ilike.%{topic}%,description.ilike.%{topic}%"
+                f"topic.ilike.%{sanitized_topic}%,title.ilike.%{sanitized_topic}%,subtopic.ilike.%{sanitized_topic}%,description.ilike.%{sanitized_topic}%"
             )
             .limit(limit)
         )

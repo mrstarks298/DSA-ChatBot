@@ -17,17 +17,17 @@ url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 
 if not url or not key:
-    print("ERROR: SUPABASE_URL and SUPABASE_KEY environment variables are required")
+    logger.error("SUPABASE_URL and SUPABASE_KEY environment variables are required")
     supabase = None
 else:
-    print(f"DEBUG: Initializing Supabase with URL: {url}")
-    print(f"DEBUG: Supabase key is set: {bool(key)}")
+    logger.info(f"Initializing Supabase with URL: {url[:20]}...")
+    logger.info("Supabase key is configured")
 
     try:
         supabase: Client = create_client(url, key)
-        print("DEBUG: Supabase client created successfully")
+        logger.info("Supabase client created successfully")
     except Exception as e:
-        print(f"ERROR: Failed to create Supabase client: {e}")
+        logger.error(f"Failed to create Supabase client: {e}")
         supabase = None
 
 def init_extensions(app):
@@ -40,7 +40,7 @@ def init_extensions(app):
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     
     global supabase
-    print(f"DEBUG: init_extensions called - supabase is None: {supabase is None}")
+    logger.info(f"init_extensions called - supabase initialized: {supabase is not None}")
     
     if supabase is None:
         logger.error("CRITICAL: Supabase client is still None after initialization!")

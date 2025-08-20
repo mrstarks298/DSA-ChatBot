@@ -485,47 +485,7 @@ def get_user_thread_list():
         return jsonify({'error': 'Failed to load threads'}), 500
 
 # Your existing routes remain the same
-@bp.route("/debug-qa-detailed")  
-def debug_qa_detailed():
-    try:
-        if not supabase:
-            return jsonify({"error": "Database not available"}), 500
-            
-        res = supabase.table("qa1_resources").select("*").limit(10).execute()
-        
-        debug_info = {
-            "total_rows": len(res.data) if res.data else 0,
-            "columns": list(res.data[0].keys()) if res.data and len(res.data) > 0 else [],
-            "sample_data": []
-        }
-        
-        if res.data:
-            for row in res.data[:3]:
-                embedding_data = row.get('embedding')
-                
-                from ..services.embeddings import _to_array
-                parsed_embedding = _to_array(embedding_data)
-                
-                debug_info["sample_data"].append({
-                    "id": row.get('id'),
-                    "section": row.get('section'),
-                    "question": row.get('question')[:100] + "..." if row.get('question') and len(row.get('question')) > 100 else row.get('question'),
-                    "has_article_link": bool(row.get('article_link')),
-                    "has_practice_link": bool(row.get('practice_link')),
-                    "article_link": row.get('article_link'),
-                    "practice_link": row.get('practice_link'),
-                    "embedding_raw_type": str(type(embedding_data)),
-                    "embedding_raw_length": len(str(embedding_data)) if embedding_data else 0,
-                    "embedding_starts_with": str(embedding_data)[:50] if embedding_data else None,
-                    "parsed_embedding_type": str(type(parsed_embedding)),
-                    "parsed_embedding_shape": parsed_embedding.shape if hasattr(parsed_embedding, 'shape') else None,
-                    "parsing_successful": parsed_embedding is not None
-                })
-        
-        return jsonify(debug_info)
-    except Exception as e:
-        logger.exception("Debug QA error")
-        return jsonify({"error": str(e)}), 500
+# Debug routes removed for production security
 
 @bp.route("/videos/<topic>")
 def videos_topic(topic):
@@ -563,13 +523,4 @@ def test_videos():
         logger.error(f"Test videos error: {e}")
         return jsonify({"status":"error","error": str(e)}), 500
 
-@bp.route("/debug-embeddings")
-def debug_embeddings():
-    try:
-        if not supabase:
-            return jsonify({"status":"error","error": "Database not available"}), 500
-            
-        res = supabase.table("text_embeddings").select("id, embedding::text").limit(2).execute()
-        return jsonify({"status":"success","raw_data_sample": res.data[:1] if res.data else [], "total_records": len(res.data or [])})
-    except Exception as e:
-        return jsonify({"status":"error","error": str(e)}), 500
+# Debug routes removed for production security

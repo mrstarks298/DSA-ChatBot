@@ -316,7 +316,7 @@
           <div class="avatar bot-avatar">AI</div>
           <span class="sender-name">DSA Mentor</span>
         </div>
-        <div class="message-content">${content}</div>
+        <div class="message-content">${Utils.escapeHtml(content)}</div>
         <div class="message-actions">
           <button class="action-btn" onclick="copyMessage('${messageId}')" title="Copy">📋</button>
           <button class="action-btn" onclick="saveMessage('${messageId}')" title="Save for later">💾</button>
@@ -660,7 +660,7 @@
             Saved ${formattedDate}
           </span>
         </div>
-        <div class="message-content">${message.fullContent || message.preview}</div>
+        <div class="message-content">${Utils.escapeHtml(message.fullContent || message.preview)}</div>
         <div class="message-actions">
           <button class="action-btn" onclick="copyMessage('${messageId}')" title="Copy">📋</button>
           <button class="action-btn" onclick="shareMessage('${messageId}')" title="Share">🔗</button>

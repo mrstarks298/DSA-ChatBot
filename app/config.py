@@ -2,7 +2,9 @@ import os
 from datetime import timedelta
 
 class BaseConfig:
-    SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "supersecret_dev_key")
+    SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
+    if not SECRET_KEY:
+        raise ValueError("FLASK_SECRET_KEY environment variable is required")
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV") == "production"
@@ -18,6 +20,17 @@ class BaseConfig:
     # Google OAuth
     GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+    
+    # Validate required environment variables
+    @classmethod
+    def validate_config(cls):
+        required_vars = [
+            "SUPABASE_URL", "SUPABASE_KEY", "GROQ_API_KEY", 
+            "HF_API_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"
+        ]
+        missing_vars = [var for var in required_vars if not getattr(cls, var)]
+        if missing_vars:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
     REDIRECT_URI = os.environ.get("REDIRECT_URI", "https://dsa-chatbot-3rll.onrender.com/oauth2callback")
 
     # API URLs
@@ -39,4 +52,6 @@ class ProductionConfig(BaseConfig):
 
 
 def get_config(name: str):
-    return ProductionConfig if name == "production" else DevelopmentConfig
+    config_class = ProductionConfig if name == "production" else DevelopmentConfig
+    config_class.validate_config()
+    return config_class

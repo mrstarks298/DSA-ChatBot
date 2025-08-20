@@ -642,13 +642,17 @@
         content.innerHTML = `
           <div class="error-message">
             <h4>❌ Error</h4>
-            <p>${error?.message || 'Something went wrong. Please try again.'}</p>
+            <p>${this.escapeHtml(error?.message || 'Something went wrong. Please try again.')}</p>
           </div>
         `;
       }
     }
     
-    showToast?.('Error: ' + (error?.message || 'Request failed'));
+    if (typeof showToast === 'function') {
+      showToast('Error: ' + (error?.message || 'Request failed'));
+    } else {
+      console.error('Error:', error?.message || 'Request failed');
+    }
   }
 
   // ===== CHAT UTILITIES =====
