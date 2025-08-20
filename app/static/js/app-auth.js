@@ -117,11 +117,13 @@
     },
 
     showSharedThreadBanner() {
-      $('sharedThreadBanner')?.style.display = 'block';
+      const banner = $('sharedThreadBanner');
+      if (banner) banner.style.display = 'block';
     },
 
     hideSharedThreadBanner() {
-      $('sharedThreadBanner')?.style.display = 'none';
+      const banner = $('sharedThreadBanner');
+      if (banner) banner.style.display = 'none';
     },
 
     updateUserProfile(user) {
