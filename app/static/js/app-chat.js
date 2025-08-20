@@ -758,15 +758,23 @@
 
         if (res.ok) {
           const blob = await res.blob();
+          
+          // Verify it's actually a PDF
+          if (blob.type !== 'application/pdf') {
+            console.warn('Response is not a PDF:', blob.type);
+            throw new Error('Server returned non-PDF content');
+          }
+          
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
           link.download = `dsa-mentor-${state?.currentThreadId || 'chat'}.pdf`;
+          link.style.display = 'none';
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
           URL.revokeObjectURL(url);
-          showToast?.('📄 PDF downloaded!');
+          showToast?.('📄 Beautiful PDF downloaded!');
           return;
         }
         if (res.status === 401 || res.status === 403) {

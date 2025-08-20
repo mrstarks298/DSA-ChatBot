@@ -290,12 +290,25 @@ def generate_pdf():
         if not html_content.strip():
             return jsonify({"error":"Empty HTML content"}), 400
 
+        # Clean HTML content
         html_content = html_content.replace('@import url(', '<!-- @import url(')
-        pdf = generate_pdf_from_html(html_content)
+        
+        # Log for debugging
+        logger.info(f"Generating PDF for thread {thread_id}, content length: {len(html_content)}")
+        
+        try:
+            pdf = generate_pdf_from_html(html_content)
+            logger.info(f"PDF generated successfully, size: {len(pdf)} bytes")
+        except Exception as pdf_error:
+            logger.error(f"PDF generation failed: {pdf_error}")
+            return jsonify({"error": f"PDF generation failed: {pdf_error}"}), 500
 
         resp = make_response(pdf)
         resp.headers['Content-Type'] = 'application/pdf'
-        resp.headers['Content-Disposition'] = f'attachment; filename=dsa-mentor-{thread_id}-{int(time.time())}.pdf'
+        resp.headers['Content-Disposition'] = f'attachment; filename="dsa-mentor-{thread_id}-{int(time.time())}.pdf"'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
         return resp
     except Exception as e:
         logger.exception("PDF generation error")
