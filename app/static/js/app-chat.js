@@ -1,19 +1,19 @@
-// ===== app-chat.js =====
+// ===== DSA MENTOR - UPDATED CHAT SYSTEM =====
 (() => {
   'use strict';
 
-  // Check for required dependencies
+  // ===== DEPENDENCY CHECK =====
   if (!window.app || !window.app.state || !window.app.util || !window.app.render) {
-    console.error('Required app modules not found. Load app-auth.js first.');
+    console.error('❌ Required app modules not found. Load app-auth.js first.');
     return;
   }
 
+  // ===== DESTRUCTURE DEPENDENCIES =====
   const $ = (id) => document.getElementById(id);
-  const { state, util, auth, render, saved } = window.app;
-  const { showToast, updateShareLink } = util;
-  const { stopPeriodicAuthCheck } = auth || {};
+  const { state, util, auth, render, saved, storage } = window.app;
+  const { showToast, updateShareLink, formatError, debounce, scrollToBottom } = util;
 
-  // DOM elements
+  // ===== DOM ELEMENTS =====
   const chatInput = $('chatInput');
   const sendButton = $('sendButton');
   const downloadBtn = $('downloadBtn');
@@ -24,6 +24,7 @@
   const ScrollManager = {
     autoScrollEnabled: true,
     scrollThreshold: 100,
+    scrollButton: null,
 
     init() {
       this.createScrollButton();
@@ -35,76 +36,34 @@
 
       const scrollBtn = document.createElement('button');
       scrollBtn.id = 'scrollToBottomBtn';
-      scrollBtn.className = 'scroll-to-bottom-btn hidden';
-      scrollBtn.innerHTML = `
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="6,9 12,15 18,9"></polyline>
-        </svg>
-      `;
+      scrollBtn.className = 'scroll-to-bottom-btn';
+      scrollBtn.innerHTML = '↓';
+      scrollBtn.title = 'Scroll to bottom';
+      scrollBtn.setAttribute('aria-label', 'Scroll to bottom of chat');
       
-      scrollBtn.style.cssText = `
-        position: fixed;
-        bottom: 120px;
-        right: 20px;
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        background: #1976d2;
-        color: white;
-        border: none;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        cursor: pointer;
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.3s ease;
-        opacity: 0;
-        visibility: hidden;
-      `;
+      scrollBtn.addEventListener('click', () => {
+        this.scrollToBottom(true);
+      });
 
-      scrollBtn.addEventListener('click', () => this.scrollToBottom(true));
       document.body.appendChild(scrollBtn);
-
-      this.addScrollButtonStyles();
-    },
-
-    addScrollButtonStyles() {
-      if (document.getElementById('scroll-btn-styles')) return;
-
-      const style = document.createElement('style');
-      style.id = 'scroll-btn-styles';
-      style.textContent = `
-        .scroll-to-bottom-btn.visible { 
-          opacity: 1 !important; 
-          visibility: visible !important; 
-        }
-        .scroll-to-bottom-btn:hover { 
-          background: #1565c0 !important; 
-          transform: translateY(-2px); 
-        }
-      `;
-      document.head.appendChild(style);
+      this.scrollButton = scrollBtn;
     },
 
     attachScrollListeners() {
-      let scrollTimeout;
-      
-      window.addEventListener('scroll', () => {
-        clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-          this.updateScrollButton();
-          this.updateAutoScrollState();
-        }, 100);
-      });
+      const debouncedUpdate = debounce(() => {
+        this.updateScrollButton();
+        this.updateAutoScrollState();
+      }, 100);
+
+      window.addEventListener('scroll', debouncedUpdate);
+      window.addEventListener('resize', debouncedUpdate);
     },
 
     updateScrollButton() {
-      const scrollBtn = $('scrollToBottomBtn');
-      if (!scrollBtn) return;
+      if (!this.scrollButton) return;
 
       const isNearBottom = this.isNearBottom();
-      scrollBtn.classList.toggle('visible', !isNearBottom);
+      this.scrollButton.classList.toggle('visible', !isNearBottom);
     },
 
     updateAutoScrollState() {
@@ -115,15 +74,14 @@
       const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
       const windowHeight = window.innerHeight;
       const documentHeight = document.documentElement.scrollHeight;
-      
       return documentHeight - (scrollTop + windowHeight) < this.scrollThreshold;
     },
 
     scrollToBottom(force = false) {
       if (force || this.autoScrollEnabled) {
-        window.scrollTo({ 
-          top: document.documentElement.scrollHeight, 
-          behavior: 'smooth' 
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior: 'smooth'
         });
         this.autoScrollEnabled = true;
       }
@@ -131,79 +89,106 @@
 
     onNewContent() {
       if (this.autoScrollEnabled) {
-        setTimeout(() => this.scrollToBottom(), 100);
+        // Small delay to ensure content is rendered
+        setTimeout(() => this.scrollToBottom(), 50);
       }
     }
   };
 
-  // ===== STREAMING WRITER =====
+  // ===== STREAMING RESPONSE WRITER =====
   const StreamingWriter = {
     activeAnimations: new Set(),
-
+    
     async writeText(element, text, options = {}) {
-      const { speed = 15, enableMarkdown = true, onComplete = null } = options;
+      const {
+        speed = 15,
+        enableMarkdown = true,
+        onComplete = null,
+        onProgress = null
+      } = options;
+
       const animationId = `${Date.now()}_${Math.random()}`;
-      
       this.activeAnimations.add(animationId);
 
       try {
         element.innerHTML = '';
         
         if (enableMarkdown) {
-          await this.writeMarkdown(element, text, speed, animationId);
+          await this.writeMarkdown(element, text, speed, animationId, onProgress);
         } else {
-          await this.writePlain(element, text, speed, animationId);
+          await this.writePlain(element, text, speed, animationId, onProgress);
         }
-        
+
         if (onComplete) onComplete();
+      } catch (error) {
+        console.error('Streaming write error:', error);
       } finally {
         this.activeAnimations.delete(animationId);
       }
     },
 
-    async writePlain(element, text, speed, animationId) {
-      let index = 0;
-      
+    async writePlain(element, text, speed, animationId, onProgress) {
       return new Promise((resolve) => {
+        let index = 0;
+        
         const writeChar = () => {
           if (!this.activeAnimations.has(animationId)) {
             return resolve();
           }
-          
+
           if (index < text.length) {
             element.textContent += text[index++];
             ScrollManager.onNewContent();
+            
+            if (onProgress) {
+              onProgress(index / text.length);
+            }
+            
             setTimeout(writeChar, speed);
           } else {
             resolve();
           }
         };
-        
+
         writeChar();
       });
     },
 
-    async writeMarkdown(element, text, speed, animationId) {
+    async writeMarkdown(element, text, speed, animationId, onProgress) {
       const html = this.markdownToHtml(text);
       const tempElement = document.createElement('div');
       tempElement.innerHTML = html;
       
-      await this.streamHTML(element, tempElement, speed, animationId);
+      await this.streamHTML(element, tempElement, speed, animationId, onProgress);
     },
 
-    async streamHTML(target, source, speed, animationId) {
-      const textNodes = this.getTextNodes(source);
+    async streamHTML(target, source, speed, animationId, onProgress) {
+      // Set up the target with the complete structure but empty text
       target.innerHTML = source.innerHTML;
       
-      const targetTextNodes = this.getTextNodes(target);
-      targetTextNodes.forEach(node => node.textContent = '');
+      const textNodes = this.getTextNodes(target);
+      const totalLength = textNodes.reduce((sum, node) => sum + node.textContent.length, 0);
+      let processedLength = 0;
       
-      for (let i = 0; i < textNodes.length && this.activeAnimations.has(animationId); i++) {
-        const sourceText = textNodes[i].textContent;
-        const targetNode = targetTextNodes[i];
+      // Clear all text content initially
+      textNodes.forEach(node => {
+        const originalText = node.textContent;
+        node.textContent = '';
+        node.setAttribute('data-original-text', originalText);
+      });
+
+      // Animate each text node sequentially
+      for (const node of textNodes) {
+        if (!this.activeAnimations.has(animationId)) break;
         
-        if (sourceText && targetNode) {
-          await this.animateTextNode(targetNode, sourceText, speed, animationId);
+        const originalText = node.getAttribute('data-original-text');
+        if (originalText) {
+          await this.animateTextNode(node, originalText, speed, animationId);
+          processedLength += originalText.length;
+          
+          if (onProgress) {
+            onProgress(processedLength / totalLength);
+          }
         }
       }
     },
@@ -216,16 +201,16 @@
           if (!this.activeAnimations.has(animationId) || index >= text.length) {
             return resolve();
           }
-          
+
           node.textContent += text[index++];
           
-          if (index % 10 === 0) {
+          if (index % 5 === 0) {
             ScrollManager.onNewContent();
           }
           
           setTimeout(writeChar, speed);
         };
-        
+
         writeChar();
       });
     },
@@ -235,15 +220,13 @@
       const walker = document.createTreeWalker(
         element,
         NodeFilter.SHOW_TEXT,
-        null,
+        node => node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
         false
       );
-      
+
       let node;
       while (node = walker.nextNode()) {
-        if (node.textContent.trim()) {
-          nodes.push(node);
-        }
+        nodes.push(node);
       }
       
       return nodes;
@@ -254,6 +237,10 @@
         .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*([\s\S]*?)\*/g, '<em>$1</em>')
         .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
         .replace(/\n\n/g, '</p><p>')
         .replace(/\n/g, '<br>')
         .replace(/^(.*)$/gm, '<p>$1</p>')
@@ -265,7 +252,7 @@
     }
   };
 
-  // ===== ENHANCED RENDERER =====
+  // ===== ENHANCED RESPONSE RENDERER =====
   const EnhancedRenderer = {
     async renderBotResponse(data, messageId) {
       const messageElement = $(messageId);
@@ -274,667 +261,670 @@
       const contentElement = messageElement.querySelector('.message-content');
       if (!contentElement) return;
 
+      // Show typing indicator
       this.showTypingIndicator(contentElement);
-      await new Promise(resolve => setTimeout(resolve, 350));
+      
+      // Wait a bit for dramatic effect
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Stream the response content
       await this.streamResponseContent(contentElement, data);
     },
 
     showTypingIndicator(element) {
       element.innerHTML = `
         <div class="typing-indicator">
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
+          <span>DSA Mentor is thinking</span>
+          <div class="typing-dots">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+          </div>
         </div>
       `;
-
-      if (!document.getElementById('typing-styles')) {
-        const style = document.createElement('style');
-        style.id = 'typing-styles';
-        style.textContent = `
-          .typing-indicator { 
-            display: flex; 
-            gap: 4px; 
-            padding: 16px 0; 
-            align-items: center; 
-          }
-          .typing-dot { 
-            width: 8px; 
-            height: 8px; 
-            border-radius: 50%; 
-            background-color: #64b5f6; 
-            animation: typing 1.4s infinite ease-in-out; 
-          }
-          .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-          .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-          @keyframes typing {
-            0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-            30% { transform: translateY(-10px); opacity: 1; }
-          }
-        `;
-        document.head.appendChild(style);
-      }
+      ScrollManager.onNewContent();
     },
 
     async streamResponseContent(element, data) {
-      let fullHTML = '';
-      
-      if (typeof data === 'string') {
-        fullHTML = data;
-      } else if (data && typeof data === 'object') {
-        fullHTML = this.buildResponseHTML(data);
-      }
-
-      if (!fullHTML) {
-        fullHTML = typeof data === 'string' ? data : 'No response content available.';
-      }
-
-      await StreamingWriter.writeText(element, fullHTML, {
-        speed: 15,
-        enableMarkdown: true,
-        onComplete: () => ScrollManager.onNewContent()
-      });
-    },
-
-    buildResponseHTML(data) {
-      let html = '';
-
-      // Title
-      if (data.best_book?.title) {
-        html += `<div class="concept-title">${this.escapeHtml(data.best_book.title)}</div>`;
-      }
-
-      // Summary
-      if (data.summary) {
-        html += `
-          <div class="concept-explanation">
-            <h4>📝 Summary</h4>
-            <p>${this.escapeHtml(data.summary)}</p>
-          </div>
-        `;
-      }
-
-      // Detailed content
-      if (data.best_book?.content) {
-        html += `
-          <div class="concept-explanation">
-            <h4>📚 Detailed Content</h4>
-            <div>${this.formatContent(data.best_book.content)}</div>
-          </div>
-        `;
-      }
-
-      // Practice problems
-      if (Array.isArray(data.top_dsa) && data.top_dsa.length) {
-        html += this.buildPracticeProblemsHTML(data.top_dsa);
-      }
-
-      // Video suggestions
-      if (Array.isArray(data.video_suggestions) && data.video_suggestions.length) {
-        html += this.buildVideoSuggestionsHTML(data.video_suggestions);
-      }
-
-      // Fallback content
-      if (!html && data.response) {
-        html = this.escapeHtml(data.response);
-      }
-
-      return html;
-    },
-
-    buildPracticeProblemsHTML(problems) {
-      let html = `
-        <div class="related-qa">
-          <h4>🎯 Related Questions</h4>
-      `;
-
-      problems.forEach(problem => {
-        html += `
-          <div class="qa-item">
-            <div class="question">${this.escapeHtml(problem.question || 'Practice Question')}</div>
-            ${problem.article_link && problem.article_link !== '#' ? 
-              `<a href="${problem.article_link}" target="_blank" class="qa-link">📖 Read Article</a>` : ''}
-            ${problem.practice_link && problem.practice_link !== '#' ? 
-              `<a href="${problem.practice_link}" target="_blank" class="qa-link">💻 Practice</a>` : ''}
-          </div>
-        `;
-      });
-
-      html += '</div>';
-      return html;
-    },
-
-    buildVideoSuggestionsHTML(videos) {
-      let html = `
-        <div class="video-suggestions">
-          <h4>🎥 Video Recommendations</h4>
-          <div class="video-grid">
-      `;
-
-      videos.forEach(video => {
-        const videoUrl = video.video_url || video.embed_url || '';
-        const title = video.title || 'Video Tutorial';
+      try {
+        let content = '';
         
-        html += `
-          <div class="video-card" onclick="openVideoModal('${videoUrl}', '${this.escapeHtml(title)}')">
-            ${video.thumbnail_url ? 
-              `<img src="${video.thumbnail_url}" alt="${this.escapeHtml(title)}" class="video-thumbnail">` : 
-              '<div class="video-thumbnail">▶</div>'}
-            <div class="video-info">
-              <div class="video-title">${this.escapeHtml(title)}</div>
-              <div class="video-meta">
-                ${video.difficulty || ''} 
-                ${video.duration ? '- ' + video.duration : ''}
-              </div>
-            </div>
+        // Build the response content
+        if (data.best_book && data.best_book.content) {
+          content += `# ${data.best_book.title || 'DSA Insights'}\n\n`;
+          content += data.best_book.content;
+        }
+
+        if (data.top_dsa && data.top_dsa.length > 0) {
+          content += '\n\n## 📚 Related Resources\n\n';
+          data.top_dsa.forEach((item, index) => {
+            if (item.question) {
+              content += `**${index + 1}. ${item.question}**\n`;
+              if (item.article_link) {
+                content += `[📖 Learn More](${item.article_link}) `;
+              }
+              if (item.practice_link) {
+                content += `[💻 Practice](${item.practice_link})`;
+              }
+              content += '\n\n';
+            }
+          });
+        }
+
+        if (data.video_suggestions && data.video_suggestions.length > 0) {
+          content += '\n\n## 🎥 Video Tutorials\n\n';
+          data.video_suggestions.forEach((video, index) => {
+            content += `**${index + 1}. ${video.title}**\n`;
+            content += `${video.description}\n`;
+            content += `Duration: ${video.duration} | Difficulty: ${video.difficulty}\n`;
+            if (video.embed_url && video.embed_url !== '#') {
+              content += `[🎬 Watch Video](${video.video_url})\n`;
+            }
+            content += '\n';
+          });
+        }
+
+        if (data.summary) {
+          content += `\n\n---\n\n*${data.summary}*`;
+        }
+
+        if (!content.trim()) {
+          content = "I'm here to help with your DSA questions! Please feel free to ask about any data structures or algorithms topic.";
+        }
+
+        // Stream write the content
+        await StreamingWriter.writeText(element, content, {
+          speed: 12,
+          enableMarkdown: true,
+          onProgress: (progress) => {
+            ScrollManager.onNewContent();
+          }
+        });
+
+        // Add interactive elements if needed
+        this.addInteractiveElements(element, data);
+
+      } catch (error) {
+        console.error('Error streaming response:', error);
+        element.innerHTML = `
+          <div class="error-message">
+            <p>Sorry, I encountered an error while processing your request.</p>
+            <p>Please try asking your question again.</p>
           </div>
         `;
-      });
-
-      html += '</div></div>';
-      return html;
+      }
     },
 
-    formatContent(content) {
-      if (!content) return '';
+    addInteractiveElements(element, data) {
+      // Add video buttons
+      if (data.video_suggestions && data.video_suggestions.length > 0) {
+        const videoLinks = element.querySelectorAll('a[href*="youtube"], a[href*="youtu.be"]');
+        videoLinks.forEach((link, index) => {
+          const video = data.video_suggestions[index];
+          if (video && video.embed_url && video.embed_url !== '#') {
+            link.addEventListener('click', (e) => {
+              e.preventDefault();
+              this.openVideoModal(video);
+            });
+          }
+        });
+      }
+
+      ScrollManager.onNewContent();
+    },
+
+    openVideoModal(video) {
+      const modal = $('videoModal');
+      const title = $('videoModalTitle');
+      const embed = $('videoEmbed');
+
+      if (modal && title && embed) {
+        title.textContent = video.title;
+        embed.src = video.embed_url;
+        modal.classList.add('active');
+        
+        // Focus management
+        setTimeout(() => {
+          const closeBtn = modal.querySelector('.video-modal-close');
+          if (closeBtn) closeBtn.focus();
+        }, 100);
+      }
+    }
+  };
+
+  // ===== MESSAGE SENDING SYSTEM =====
+  const MessageSender = {
+    isSending: false,
+
+    async sendMessage() {
+      const query = chatInput?.value?.trim();
+      if (!query || this.isSending || sendButton?.disabled) {
+        return;
+      }
+
+      // Check authentication
+      if (!auth.isAuthenticated()) {
+        showToast('Please sign in to start chatting', 'warning');
+        return;
+      }
+
+      this.isSending = true;
+      this.disableInput();
+
+      try {
+        // Hide welcome screen on first message
+        if (state.isFirstMessage) {
+          const welcomeScreen = $('welcomeScreen');
+          if (welcomeScreen) {
+            welcomeScreen.style.display = 'none';
+          }
+          state.isFirstMessage = false;
+        }
+
+        // Add user message
+        render.addMessage('user', query);
+        chatInput.value = '';
+        ScrollManager.onNewContent();
+
+        // Create bot message placeholder
+        const messageId = `msg-${Date.now()}`;
+        render.addBotMessage('', messageId);
+
+        // Prepare payload
+        const payload = {
+          query: query,
+          thread_id: state.currentThreadId
+        };
+
+        // Try streaming first, fallback to JSON
+        let response = await this.attemptStreamingRequest(payload);
+        
+        if (response.status === 404) {
+          response = await this.attemptJSONRequest(payload);
+        }
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+
+        // Handle the response
+        await this.handleResponse(response, messageId);
+
+      } catch (error) {
+        console.error('Send message error:', error);
+        this.handleSendError(error, messageId);
+      } finally {
+        this.isSending = false;
+        this.enableInput();
+      }
+    },
+
+    async attemptStreamingRequest(payload) {
+      return fetch('/query-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream, application/json'
+        },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin'
+      });
+    },
+
+    async attemptJSONRequest(payload) {
+      return fetch('/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin'
+      });
+    },
+
+    async handleResponse(response, messageId) {
+      const contentType = response.headers.get('content-type') || '';
+      const placeholder = $(messageId)?.querySelector('.message-content');
+
+      if (!placeholder) {
+        throw new Error('Message placeholder not found');
+      }
+
+      if (contentType.includes('text/event-stream') && response.body) {
+        await this.handleStreamingResponse(response, placeholder, messageId);
+      } else {
+        const data = await response.json();
+        if (data.thread_id) {
+          state.currentThreadId = data.thread_id;
+          updateShareLink(state.currentThreadId);
+        }
+        await EnhancedRenderer.renderBotResponse(data, messageId);
+      }
+    },
+
+    async handleStreamingResponse(response, placeholder, messageId) {
+      EnhancedRenderer.showTypingIndicator(placeholder);
       
-      return content
-        .replace(/\n\n/g, '</p><p>')
-        .replace(/\n/g, '<br>')
-        .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*([\s\S]*?)\*/g, '<em>$1</em>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let finalJson = null;
+      let hasStartedStreaming = false;
+
+      const appendText = (text) => {
+        if (!hasStartedStreaming) {
+          placeholder.innerHTML = '<p></p>';
+          hasStartedStreaming = true;
+        }
+        
+        const contentElement = placeholder.querySelector('p');
+        if (contentElement) {
+          contentElement.innerHTML += this.escapeHtml(text);
+          ScrollManager.onNewContent();
+        }
+      };
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+
+          for (const eventString of events) {
+            const event = this.parseSSEEvent(eventString);
+            if (!event) continue;
+
+            switch (event.name) {
+              case 'chunk':
+                try {
+                  const chunkData = JSON.parse(event.data);
+                  if (chunkData.text) {
+                    appendText(chunkData.text);
+                  }
+                } catch {
+                  appendText(event.data);
+                }
+                break;
+
+              case 'final_json':
+                try {
+                  finalJson = JSON.parse(event.data);
+                } catch (error) {
+                  console.error('Failed to parse final JSON:', error);
+                }
+                break;
+
+              case 'meta':
+                try {
+                  const meta = JSON.parse(event.data);
+                  if (meta.thread_id) {
+                    state.currentThreadId = meta.thread_id;
+                    updateShareLink(state.currentThreadId);
+                  }
+                } catch (error) {
+                  console.error('Failed to parse meta:', error);
+                }
+                break;
+
+              case 'error':
+                throw new Error(event.data);
+            }
+          }
+        }
+
+        // Render final response if available
+        if (finalJson) {
+          await EnhancedRenderer.renderBotResponse(finalJson, messageId);
+        }
+
+      } catch (error) {
+        console.error('Streaming error:', error);
+        throw error;
+      }
+    },
+
+    parseSSEEvent(eventString) {
+      const lines = eventString.split('\n');
+      let eventName = 'message';
+      let data = '';
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          data += line.slice(5).trim();
+        }
+      }
+
+      return data ? { name: eventName, data } : null;
     },
 
     escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
-    }
-  };
+    },
 
-  // ===== ENHANCED SEND MESSAGE WITH STREAMING =====
-  window.sendMessage = async function() {
-    const query = chatInput?.value?.trim();
-    if (!query || sendButton?.disabled) return;
-
-    if (sendButton) sendButton.disabled = true;
-    if (chatInput) { 
-      chatInput.disabled = true; 
-      chatInput.style.opacity = '0.7'; 
-    }
-
-    try {
-      // Hide welcome screen on first message
-      const welcomeScreen = $('welcomeScreen');
-      if (welcomeScreen) {
-        welcomeScreen.style.display = 'none';
-        state.isFirstMessage = false;
-      }
-
-      render.addMessage?.('user', query);
-      if (chatInput) chatInput.value = '';
-      ScrollManager.onNewContent();
-
-      const messageId = `msg-${Date.now()}`;
-      render.addBotMessage?.('', messageId);
-
-      const payload = { query };
-      if (state?.currentThreadId) {
-        payload.thread_id = state.currentThreadId;
-      }
-
-      // Try streaming endpoint first, fallback to JSON
-      let response = await fetch('/query-stream', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'Accept': 'text/event-stream, application/json' 
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.status === 404) {
-        // Fallback to regular JSON endpoint
-        response = await fetch('/query', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json', 
-            'Accept': 'application/json' 
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`Server error: ${response.status} ${errorText}`);
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      const placeholder = $(messageId)?.querySelector('.message-content');
-      
-      if (!placeholder) {
-        throw new Error('Message placeholder not found');
-      }
-
-      // Handle Server-Sent Events streaming
-      if (contentType.includes('text/event-stream') && response.body) {
-        await handleStreamingResponse(response, placeholder, messageId);
-      } else {
-        // Handle regular JSON response
-        const data = await response.json();
-        
-        if (data.thread_id) {
-          state.currentThreadId = data.thread_id;
-          updateShareLink?.(state.currentThreadId);
-        }
-        
-        await EnhancedRenderer.renderBotResponse(data, messageId);
-      }
-
-    } catch (error) {
-      console.error('Send message error:', error);
-      handleSendError(error, messageId);
-    } finally {
-      if (sendButton) sendButton.disabled = false;
-      if (chatInput) { 
-        chatInput.disabled = false; 
-        chatInput.style.opacity = '1'; 
-        chatInput.focus(); 
-      }
-    }
-  };
-
-  // ===== STREAMING RESPONSE HANDLER =====
-  async function handleStreamingResponse(response, placeholder, messageId) {
-    EnhancedRenderer.showTypingIndicator(placeholder);
-
-    const decoder = new TextDecoder('utf-8');
-    const reader = response.body.getReader();
-    let buffer = '';
-    let finalJson = null;
-
-    const appendText = (text) => {
-      const contentElement = placeholder.querySelector('p') || placeholder;
-      const escapedText = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      contentElement.innerHTML += escapedText;
-      ScrollManager.onNewContent();
-    };
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop() || '';
-
-      for (const eventString of events) {
-        const event = parseSSEEvent(eventString);
-        if (!event) continue;
-
-        switch (event.name) {
-          case 'chunk':
-            try {
-              const chunkData = JSON.parse(event.data);
-              if (chunkData.text) {
-                appendText(chunkData.text);
-              }
-            } catch {
-              appendText(event.data);
-            }
-            break;
-
-          case 'final_json':
-            try {
-              finalJson = JSON.parse(event.data);
-            } catch (error) {
-              console.error('Failed to parse final JSON:', error);
-            }
-            break;
-
-          case 'meta':
-            try {
-              const meta = JSON.parse(event.data);
-              if (meta.thread_id) {
-                state.currentThreadId = meta.thread_id;
-                updateShareLink?.(state.currentThreadId);
-              }
-            } catch (error) {
-              console.error('Failed to parse meta:', error);
-            }
-            break;
-        }
-      }
-    }
-
-    // Render final response if available
-    if (finalJson) {
-      await EnhancedRenderer.renderBotResponse(finalJson, messageId);
-    }
-  }
-
-  function parseSSEEvent(eventString) {
-    const lines = eventString.split('\n');
-    let eventName = 'message';
-    let data = '';
-
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        eventName = line.slice(6).trim();
-      } else if (line.startsWith('data:')) {
-        data += line.slice(5).trim();
-      }
-    }
-
-    return data ? { name: eventName, data } : null;
-  }
-
-  function handleSendError(error, messageId) {
-    const messageElement = $(messageId);
-    if (messageElement) {
-      const content = messageElement.querySelector('.message-content');
-      if (content) {
-        content.innerHTML = `
-          <div class="error-message">
-            <h4>❌ Error</h4>
-            <p>${this.escapeHtml(error?.message || 'Something went wrong. Please try again.')}</p>
-          </div>
-        `;
-      }
-    }
-    
-    if (typeof showToast === 'function') {
-      showToast('Error: ' + (error?.message || 'Request failed'));
-    } else {
-      console.error('Error:', error?.message || 'Request failed');
-    }
-  }
-
-  // ===== CHAT UTILITIES =====
-  const ChatUtilities = {
-    copyMessage(messageId) {
+    handleSendError(error, messageId) {
       const messageElement = $(messageId);
       if (!messageElement) return;
 
-      const contentElement = messageElement.querySelector('.message-content');
-      if (!contentElement) return;
+      const content = messageElement.querySelector('.message-content');
+      if (!content) return;
 
-      const textContent = contentElement.innerText || contentElement.textContent;
+      let errorMessage = 'Sorry, I encountered an error processing your request.';
       
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(textContent).then(() => {
-          showToast?.('📋 Message copied to clipboard!');
-        }).catch(() => {
-          this.fallbackCopyText(textContent);
-        });
-      } else {
-        this.fallbackCopyText(textContent);
+      if (error.message.includes('401')) {
+        errorMessage = 'Your session has expired. Please sign in again.';
+        // Trigger auth check
+        auth.performAuthCheck(true);
+      } else if (error.message.includes('400')) {
+        errorMessage = 'Your message was invalid. Please try rephrasing it.';
+      } else if (error.message.includes('500')) {
+        errorMessage = 'Server error. Please try again in a moment.';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Request timed out. Please try again.';
+      }
+
+      content.innerHTML = `
+        <div class="error-message">
+          <div class="error-icon">⚠️</div>
+          <div class="error-text">${errorMessage}</div>
+          <button onclick="MessageSender.retryLastMessage()" class="retry-btn">Try Again</button>
+        </div>
+      `;
+
+      showToast('Message failed to send', 'error');
+    },
+
+    retryLastMessage() {
+      if (chatInput && !this.isSending) {
+        chatInput.focus();
+        showToast('Please try sending your message again', 'info');
       }
     },
 
-    fallbackCopyText(text) {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
+    disableInput() {
+      if (sendButton) {
+        sendButton.disabled = true;
+        sendButton.textContent = 'Sending...';
+      }
+      
+      if (chatInput) {
+        chatInput.disabled = true;
+        chatInput.style.opacity = '0.7';
+      }
+    },
+
+    enableInput() {
+      if (sendButton) {
+        sendButton.disabled = false;
+        sendButton.innerHTML = '<span>Send</span><span>🚀</span>';
+      }
+      
+      if (chatInput) {
+        chatInput.disabled = false;
+        chatInput.style.opacity = '1';
+        chatInput.focus();
+      }
+    }
+  };
+
+  // ===== INPUT HANDLING =====
+  const InputManager = {
+    init() {
+      this.setupChatInput();
+      this.setupSendButton();
+      this.setupAutoResize();
+    },
+
+    setupChatInput() {
+      if (!chatInput) return;
+
+      // Enter key handling
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          MessageSender.sendMessage();
+        }
+      });
+
+      // Input validation
+      chatInput.addEventListener('input', (e) => {
+        const value = e.target.value;
+        const maxLength = state.config.maxQueryLength || 2000;
+        
+        if (value.length > maxLength) {
+          e.target.value = value.substring(0, maxLength);
+          showToast(`Message truncated to ${maxLength} characters`, 'warning');
+        }
+        
+        this.updateSendButton();
+      });
+
+      // Paste handling
+      chatInput.addEventListener('paste', (e) => {
+        setTimeout(() => this.updateSendButton(), 10);
+      });
+    },
+
+    setupSendButton() {
+      if (!sendButton) return;
+
+      sendButton.addEventListener('click', () => {
+        MessageSender.sendMessage();
+      });
+    },
+
+    setupAutoResize() {
+      if (!chatInput) return;
+
+      const autoResize = () => {
+        chatInput.style.height = 'auto';
+        const newHeight = Math.min(chatInput.scrollHeight, 120);
+        chatInput.style.height = newHeight + 'px';
+      };
+
+      chatInput.addEventListener('input', autoResize);
+      chatInput.addEventListener('paste', () => setTimeout(autoResize, 10));
+
+      // Initial resize
+      autoResize();
+    },
+
+    updateSendButton() {
+      if (!sendButton || !chatInput) return;
+
+      const hasText = chatInput.value.trim().length > 0;
+      const isAuthenticated = auth.isAuthenticated();
+      
+      sendButton.disabled = !hasText || !isAuthenticated || MessageSender.isSending;
+    }
+  };
+
+  // ===== EXPORT & SHARE FUNCTIONALITY =====
+  const ExportManager = {
+    init() {
+      this.setupDownloadButton();
+      this.setupShareButton();
+    },
+
+    setupDownloadButton() {
+      if (!downloadBtn) return;
+
+      downloadBtn.addEventListener('click', () => {
+        this.exportChat();
+      });
+    },
+
+    setupShareButton() {
+      if (!shareBtn) return;
+
+      shareBtn.addEventListener('click', () => {
+        this.shareChat();
+      });
+    },
+
+    async exportChat() {
+      try {
+        const chatContent = $('chatContent');
+        if (!chatContent) return;
+
+        const messages = Array.from(chatContent.querySelectorAll('.message')).map(msg => {
+          const isUser = msg.classList.contains('user-message');
+          const content = msg.querySelector('.message-content')?.textContent || '';
+          return {
+            sender: isUser ? 'user' : 'assistant',
+            content: content,
+            timestamp: new Date().toISOString()
+          };
+        });
+
+        if (messages.length === 0) {
+          showToast('No messages to export', 'warning');
+          return;
+        }
+
+        const exportData = {
+          title: `DSA Mentor Chat - ${new Date().toLocaleDateString()}`,
+          messages: messages,
+          threadId: state.currentThreadId,
+          exportedAt: new Date().toISOString()
+        };
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+          type: 'application/json'
+        });
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dsa-mentor-chat-${Date.now()}.json`;
+        a.click();
+
+        URL.revokeObjectURL(url);
+        showToast('Chat exported successfully', 'success');
+
+      } catch (error) {
+        console.error('Export error:', error);
+        showToast('Export failed', 'error');
+      }
+    },
+
+    shareChat() {
+      const shareModal = $('shareModal');
+      const shareLink = $('shareLink');
+      
+      if (shareModal && shareLink) {
+        updateShareLink(state.currentThreadId);
+        shareModal.classList.add('active');
+        
+        // Focus management
+        setTimeout(() => {
+          shareLink.focus();
+          shareLink.select();
+        }, 100);
+      }
+    }
+  };
+
+  // ===== GLOBAL MESSAGE SENDER =====
+  window.sendMessage = MessageSender.sendMessage.bind(MessageSender);
+
+  // ===== SUGGESTION HANDLER =====
+  window.sendSuggestion = function(text) {
+    if (chatInput && auth.isAuthenticated()) {
+      chatInput.value = text;
+      chatInput.focus();
+      MessageSender.sendMessage();
+    } else if (!auth.isAuthenticated()) {
+      showToast('Please sign in to start chatting', 'warning');
+    }
+  };
+
+  // ===== MODAL HANDLERS =====
+  window.closeShareModal = function() {
+    const modal = $('shareModal');
+    if (modal) modal.classList.remove('active');
+  };
+
+  window.copyShareLink = function() {
+    const shareLink = $('shareLink');
+    if (shareLink) {
+      shareLink.select();
       
       try {
         document.execCommand('copy');
-        showToast?.('📋 Message copied to clipboard!');
+        showToast('Link copied to clipboard!', 'success');
+        closeShareModal();
       } catch (error) {
-        showToast?.('❌ Failed to copy message');
-      }
-      
-      document.body.removeChild(textarea);
-    },
-
-    saveMessage(messageId) {
-      const messageElement = $(messageId);
-      if (!messageElement) return;
-
-      const contentElement = messageElement.querySelector('.message-content');
-      const titleElement = messageElement.querySelector('.concept-title') || 
-                          messageElement.querySelector('.sender-name');
-      
-      if (!contentElement) return;
-
-      const content = contentElement.innerHTML;
-      const title = titleElement ? titleElement.textContent : 'DSA Concept';
-      
-      if (saved?.saveMessage) {
-        saved.saveMessage(messageId, title, content);
-      }
-    },
-
-    shareMessage(messageId) {
-      const messageElement = $(messageId);
-      if (!messageElement) return;
-
-      const contentElement = messageElement.querySelector('.message-content');
-      if (!contentElement) return;
-
-      const textContent = contentElement.innerText || contentElement.textContent;
-      const shareData = {
-        title: 'DSA Mentor - Shared Message',
-        text: textContent.substring(0, 200) + (textContent.length > 200 ? '...' : ''),
-        url: window.location.href
-      };
-
-      if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
-        navigator.share(shareData).catch(console.error);
-      } else {
-        const shareUrl = `${window.location.origin}/chat/${state?.currentThreadId || ''}`;
-        
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast?.('🔗 Share link copied to clipboard!');
-          });
-        } else {
-          this.fallbackCopyText(shareUrl);
-        }
-      }
-    },
-
-    async downloadChat() {
-      const chatContent = $('chatContent');
-      if (!chatContent) return;
-
-      try {
-        const html = chatContent.innerHTML;
-        const payload = { html, thread_id: state?.currentThreadId || 'unknown' };
-        const res = await fetch('/generate-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          const blob = await res.blob();
-          
-          // Verify it's actually a PDF
-          if (blob.type !== 'application/pdf') {
-            console.warn('Response is not a PDF:', blob.type);
-            throw new Error('Server returned non-PDF content');
-          }
-          
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `dsa-mentor-${state?.currentThreadId || 'chat'}.pdf`;
-          link.style.display = 'none';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          showToast?.('📄 Beautiful PDF downloaded!');
-          return;
-        }
-        if (res.status === 401 || res.status === 403) {
-          showToast?.('Please login to download PDF');
-        }
-        throw new Error(`PDF generation failed (${res.status})`);
-      } catch (e) {
-        // Fallback to text export
-        const messages = chatContent.querySelectorAll('.message');
-        let chatText = 'DSA Mentor Chat Export\n';
-        chatText += '========================\n\n';
-        messages.forEach((message) => {
-          const isUser = message.classList.contains('user-message');
-          const sender = isUser ? 'You' : 'DSA Mentor';
-          const content = message.querySelector('.message-content');
-          if (content) {
-            const text = content.innerText || content.textContent;
-            chatText += `${sender}:\n${text}\n\n`;
-          }
-        });
-        const blob = new Blob([chatText], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `dsa-chat-${new Date().toISOString().split('T')[0]}.txt`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        showToast?.('💾 Chat downloaded as text');
-      }
-    },
-
-    shareCurrentChat() {
-      const shareUrl = `${window.location.origin}/chat/${state?.currentThreadId || ''}`;
-      
-      if (navigator.share) {
-        navigator.share({
-          title: 'DSA Mentor Chat',
-          text: 'Check out my DSA learning session!',
-          url: shareUrl
-        }).catch(console.error);
-      } else {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast?.('🔗 Share link copied to clipboard!');
-          });
-        } else {
-          ChatUtilities.fallbackCopyText(shareUrl);
-        }
+        console.error('Copy failed:', error);
+        showToast('Copy failed. Please copy the link manually.', 'warning');
       }
     }
   };
 
-  // ===== GLOBAL FUNCTION BINDINGS =====
-  window.copyMessage = ChatUtilities.copyMessage.bind(ChatUtilities);
-  window.saveMessage = ChatUtilities.saveMessage.bind(ChatUtilities);
-  window.shareMessage = ChatUtilities.shareMessage.bind(ChatUtilities);
-
-  // ===== EVENT LISTENERS =====
-  function setupChatEventListeners() {
-    // Send button click
-    if (sendButton) {
-      sendButton.addEventListener('click', () => window.sendMessage());
-    }
-
-    // Enter key in chat input
-    if (chatInput) {
-      chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          window.sendMessage();
-        }
-      });
-    }
-
-    // Download chat (PDF via backend with fallback)
-    if (downloadBtn) {
-      downloadBtn.addEventListener('click', ChatUtilities.downloadChat);
-    }
-
-    // Share chat → open modal and populate link (fallback to native share)
-    if (shareBtn) {
-      shareBtn.addEventListener('click', () => {
-        const shareModal = $('shareModal');
-        const shareLink = $('shareLink');
-        const url = `${window.location.origin}/chat/${state?.currentThreadId || ''}`;
-
-        if (navigator.share) {
-          navigator.share({
-            title: 'DSA Mentor Chat',
-            text: 'Check out my DSA learning session!',
-            url
-          }).catch(() => {
-            if (shareLink) shareLink.value = url;
-            shareModal?.classList.add('active');
-          });
-        } else {
-          if (shareLink) shareLink.value = url;
-          shareModal?.classList.add('active');
-        }
-      });
-    }
-
-    // Modal close events
-    document.addEventListener('click', (e) => {
-      if (e.target.classList?.contains('modal-overlay')) {
-        e.target.classList.remove('active');
-      }
-      if (e.target.classList?.contains('video-modal') && window.closeVideoModal) {
-        window.closeVideoModal();
-      }
-    });
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.key === 'b') {
-        e.preventDefault();
-        ScrollManager.scrollToBottom(true);
-        showToast?.('Scrolled to bottom');
-      }
-    });
-
-    // Before unload cleanup
-    window.addEventListener('beforeunload', () => {
-      stopPeriodicAuthCheck?.();
-      StreamingWriter.stopAll();
-    });
-  }
+  window.closeVideoModal = function() {
+    const modal = $('videoModal');
+    const embed = $('videoEmbed');
+    
+    if (modal) modal.classList.remove('active');
+    if (embed) embed.src = '';
+  };
 
   // ===== INITIALIZATION =====
-  function initializeChat() {
-    try {
-      setupChatEventListeners();
-      ScrollManager.init();
-      
-      if (state?.serverUser?.is_authenticated && chatInput) {
-        chatInput.focus();
+  document.addEventListener('DOMContentLoaded', () => {
+    // Wait for auth system to be ready
+    const initChat = () => {
+      if (!state.isInitialized) {
+        setTimeout(initChat, 100);
+        return;
       }
-      
-      console.log('DSA Mentor Chat module loaded successfully');
-    } catch (error) {
-      console.error('Failed to initialize app-chat:', error);
-      showToast?.('Chat initialization failed');
+
+      try {
+        console.log('🎯 Initializing chat system...');
+        
+        ScrollManager.init();
+        InputManager.init();
+        ExportManager.init();
+        
+        // Set up periodic input state updates
+        setInterval(() => {
+          InputManager.updateSendButton();
+        }, 1000);
+
+        console.log('✅ Chat system initialized');
+        
+      } catch (error) {
+        console.error('❌ Chat system initialization failed:', error);
+      }
+    };
+
+    initChat();
+  });
+
+  // ===== KEYBOARD SHORTCUTS =====
+  document.addEventListener('keydown', (e) => {
+    // Ctrl/Cmd + Enter to send message
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      MessageSender.sendMessage();
     }
-  }
+    
+    // Escape to close modals
+    if (e.key === 'Escape') {
+      closeVideoModal();
+      closeShareModal();
+    }
+  });
 
-  // Initialize when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeChat);
-  } else {
-    initializeChat();
-  }
-
-  // ===== EXTEND APP OBJECT =====
-  window.app.scroll = ScrollManager;
-  window.app.streaming = StreamingWriter;
-  window.app.enhanced = EnhancedRenderer;
-  window.app.chat = ChatUtilities;
-
-  console.log('App chat module loaded');
+  // ===== CLEANUP =====
+  window.addEventListener('beforeunload', () => {
+    StreamingWriter.stopAll();
+  });
 
 })();
