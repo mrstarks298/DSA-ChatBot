@@ -1,387 +1,325 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DSA Mentor - AI-Powered Data Structures Learning</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/app.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>DSA Mentor - Your AI Learning Companion</title>
+    <meta name="description" content="Master Data Structures and Algorithms with AI-powered personalized learning">
+    <meta name="theme-color" content="#1B7EFE">
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="/static/app.css" as="style">
+    <link rel="preload" href="/static/app-auth.js" as="script">
+    <link rel="preload" href="/static/app-chat.js" as="script">
+    
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/static/app.css">
+    
+    <!-- PWA manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    
+    <!-- Open Graph tags -->
+    <meta property="og:title" content="DSA Mentor - AI Learning Companion">
+    <meta property="og:description" content="Master Data Structures and Algorithms with personalized AI guidance">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ request.url }}">
 </head>
-<body data-theme="light" 
-      data-shared-view="{{ 'true' if is_shared_view else 'false' }}" 
-      data-shared-thread-id="{{ shared_thread_id or '' }}">
-  <div class="app-container">
-    <!-- Sidebar -->
-    <div class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <div class="logo-icon">DSA</div>
-          <div class="logo-text">DSA Mentor</div>
-        </div>
-        <button class="new-thread-btn" id="newThreadBtn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 4V20M4 12H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-          New Thread
-        </button>
-      </div>
-      <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
 
-      <div class="sidebar-content">
-        <div class="section-label">
-          Saved Messages
-          <button class="clear-saved-btn" id="clearSavedBtn" style="display: none;">Clear All</button>
+<body data-theme="light">
+    <!-- Shared Thread Banner (hidden by default) -->
+    <div id="sharedThreadBanner" class="shared-thread-banner" style="display: none;">
+        <div class="banner-content">
+            <div class="banner-icon">👥</div>
+            <div class="banner-text">
+                <h3>You're viewing a shared conversation</h3>
+                <p>Sign in to start your own personalized learning journey</p>
+            </div>
+            <button class="banner-login-btn" onclick="window.location.href='/login'">
+                <span>🔑</span>
+                <span>Sign In</span>
+            </button>
         </div>
-
-        <ul class="saved-list" id="savedList">
-          <div class="empty-saved" id="emptySaved">
-            <svg class="empty-saved-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M19 21L12 16L5 21V5C5 4.46957 5.21071 3.96086 5.58579 3.58579C5.96086 3.21071 6.46957 3 7 3H17C17.5304 3 18.0391 3.21071 18.4142 3.58579C18.7893 3.96086 19 4.46957 19 5V21Z" stroke="currentColor" stroke-width="2"/>
-            </svg>
-            <p>No saved messages yet</p>
-            <p style="font-size: 12px; margin-top: 4px;">Click the bookmark icon on any message to save it</p>
-          </div>
-        </ul>
-      </div>
-
-      <!-- Profile Section -->
-      <div class="profile-section">
-        <div class="profile-container" id="profileContainer">
-          <div class="profile-avatar">U</div>
-          <div class="profile-info">
-            <div class="profile-name">User</div>
-            <div class="profile-status">Free Plan</div>
-          </div>
-        </div>
-      </div>
     </div>
 
-    <!-- Shared Thread Banner (shown when viewing shared thread without login) -->
-    <div class="shared-thread-banner" id="sharedThreadBanner" style="display: none;">
-      <div class="banner-content">
-        <div class="banner-icon">🔗</div>
-        <div class="banner-text">
-          <h3>Shared Thread</h3>
-          <p>You're viewing a shared conversation. Login to continue the discussion and save your own progress.</p>
-        </div>
-        <button class="banner-login-btn" onclick="handleLogin()">
-          <div class="google-icon"></div>
-          Login to Continue
-        </button>
-      </div>
+    <!-- Main App Container -->
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <!-- Sidebar Header -->
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">🚀</div>
+                    <div class="logo-text">DSA Mentor</div>
+                </div>
+                <button class="header-btn new-thread-btn" id="newThreadBtn" title="Start New Conversation">
+                    <span>➕</span>
+                </button>
+            </div>
+
+            <!-- Sidebar Content -->
+            <div class="sidebar-content">
+                <!-- Saved Messages Section -->
+                <div class="section-label">💾 Saved Messages</div>
+                <div class="saved-list" id="savedList">
+                    <div class="empty-saved">
+                        <div class="empty-saved-icon">📝</div>
+                        <p>No saved messages yet</p>
+                        <p>Save important conversations for later</p>
+                    </div>
+                </div>
+                <button class="clear-saved-btn" id="clearSavedBtn" style="display: none;">
+                    Clear All Saved
+                </button>
+            </div>
+
+            <!-- Profile Section -->
+            <div class="profile-section">
+                <div class="profile-container">
+                    <div class="profile-avatar">?</div>
+                    <div class="profile-info">
+                        <div class="profile-name">Guest User</div>
+                        <div class="profile-status">Sign in to save progress</div>
+                    </div>
+                    <button class="header-btn" id="themeToggle" title="Toggle Theme">
+                        <span class="sun-icon">☀️</span>
+                        <span class="moon-icon" style="display: none;">🌙</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Mobile Sidebar Overlay -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <button class="mobile-menu-btn" id="mobileMenuBtn">
+                    <span>☰</span>
+                </button>
+                <h1 class="header-title">DSA Learning Assistant</h1>
+                <div class="header-actions">
+                    <button class="header-btn" id="downloadBtn" title="Export Chat">
+                        <span>📥</span>
+                    </button>
+                    <button class="header-btn" id="shareBtn" title="Share Conversation">
+                        <span>🔗</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Chat Area -->
+            <div class="chat-area" id="chatArea">
+                <div class="chat-content" id="chatContent">
+                    <!-- Welcome Screen -->
+                    <div class="welcome-screen" id="welcomeScreen">
+                        <h2 class="welcome-title">Welcome to DSA Mentor</h2>
+                        <p class="welcome-subtitle">Your AI-powered companion for mastering Data Structures and Algorithms</p>
+                        
+                        <!-- Feature Cards -->
+                        <div class="suggestion-cards">
+                            <div class="suggestion-card" onclick="sendSuggestion('Explain binary search algorithm')">
+                                <h4>🔍 Algorithm Analysis</h4>
+                                <p>Learn about time and space complexity with detailed explanations</p>
+                            </div>
+                            <div class="suggestion-card" onclick="sendSuggestion('Show me how to implement a binary tree')">
+                                <h4>💻 Code Implementation</h4>
+                                <p>Get clean, well-commented code in your preferred language</p>
+                            </div>
+                            <div class="suggestion-card" onclick="sendSuggestion('What are common graph algorithms?')">
+                                <h4>🎯 Problem Solving</h4>
+                                <p>Discover patterns and techniques for interview success</p>
+                            </div>
+                            <div class="suggestion-card" onclick="sendSuggestion('Generate practice problems for arrays')">
+                                <h4>📝 Practice Problems</h4>
+                                <p>Find curated problems to strengthen your skills</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="input-container">
+                    <div class="input-wrapper">
+                        <textarea 
+                            id="chatInput" 
+                            class="chat-input" 
+                            placeholder="Ask me anything about Data Structures and Algorithms..."
+                            rows="1"
+                            maxlength="2000"
+                            disabled
+                        ></textarea>
+                        <button id="sendButton" class="send-button" disabled>
+                            <span>Send</span>
+                            <span>🚀</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
     <!-- Authentication Overlay -->
     <div class="auth-overlay" id="authOverlay">
-      <div class="auth-container">
-        <div class="auth-icon">
-          <div class="laptop-icon"></div>
-          <div class="lock-icon"></div>
-        </div>
-
-        <h1 class="auth-title">
-          Please Login To Continue <span class="problem-text">Solving Problem</span>
-        </h1>
-        <p class="auth-subtitle">Access your personalized DSA learning experience</p>
-
-        <button class="login-btn" onclick="handleLogin()">
-          <div class="google-icon"></div>
-          Login with Google
-        </button>
-
-        <div class="auth-features">
-          <ul class="feature-list">
-            <li class="feature-item"><span class="feature-icon">✓</span>Save your progress</li>
-            <li class="feature-item"><span class="feature-icon">✓</span>Personalized learning path</li>
-            <li class="feature-item"><span class="feature-icon">✓</span>Track solved problems</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- Main Content -->
-    <div class="main-content">
-      <div class="header">
-        <div class="header-left">
-                    <button class="mobile-menu-btn mobile-only" onclick="toggleSidebar()">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-              </svg>
-            </button>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z" stroke="currentColor" stroke-width="2"/>
-          </svg>
-          <h3 class="header-title">DSA Learning Assistant</h3>
-        </div>
-
-        <div class="header-actions">
-          <button class="header-btn" id="shareBtn" title="Share Chat">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 12V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V12" stroke="currentColor" stroke-width="2"/>
-              <polyline points="16,6 12,2 8,6" stroke="currentColor" stroke-width="2"/>
-              <line x1="12" y1="2" x2="12" y2="15" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </button>
-
-          <button class="header-btn" id="downloadBtn" title="Download Chat">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2"/>
-              <polyline points="7,10 12,15 17,10" stroke="currentColor" stroke-width="2"/>
-              <line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </button>
-
-          <button class="header-btn" id="themeToggle" title="Toggle Theme">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="sun-icon">
-              <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
-              <line x1="12" y1="1" x2="12" y2="3" stroke="currentColor" stroke-width="2"/>
-              <line x1="12" y1="21" x2="12" y2="23" stroke="currentColor" stroke-width="2"/>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" stroke="currentColor" stroke-width="2"/>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" stroke="currentColor" stroke-width="2"/>
-              <line x1="1" y1="12" x2="3" y2="12" stroke="currentColor" stroke-width="2"/>
-              <line x1="21" y1="12" x2="23" y2="12" stroke="currentColor" stroke-width="2"/>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" stroke="currentColor" stroke-width="2"/>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" stroke="currentColor" stroke-width="2"/>
-            </svg>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="moon-icon" style="display: none;">
-              <path d="M21 12.79C20.8427 14.4922 20.2039 16.1144 19.1583 17.4668C18.1127 18.8192 16.7035 19.8458 15.0957 20.4265C13.4879 21.0073 11.7479 21.1181 10.0795 20.7461C8.41104 20.3741 6.8928 19.5345 5.70479 18.3465C4.51677 17.1585 3.67714 15.6403 3.30513 13.9708C2.93312 12.3014 3.04394 10.5614 3.62469 8.95363C4.20544 7.34588 5.23199 5.93666 6.58438 4.89106C7.93677 3.84546 9.559 3.20663 11.26 3.04999C10.2426 4.36045 9.69846 6.00108 9.72601 7.68391C9.75355 9.36674 10.3516 10.9889 11.4071 12.2604C12.4626 13.5319 13.9052 14.3706 15.5022 14.6312C17.0992 14.8918 18.7361 14.5586 20.12 13.6899C20.6639 14.489 21.0313 15.3983 21.2019 16.3472C21.3725 17.2961 21.3426 18.2676 21.1137 19.2054C21.0551 19.2474 21.0551 19.2054 21 12.79Z" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <div class="chat-area" id="chatArea">
-        <div class="chat-content" id="chatContent">
-          <div class="welcome-screen" id="welcomeScreen">
-            <h1 class="welcome-title">Welcome to DSA Mentor</h1>
-            <p class="welcome-subtitle">
-              Your AI-powered companion for mastering Data Structures and Algorithms
-            </p>
-
-            <div class="suggestion-cards">
-              <div class="suggestion-card" onclick="askQuestion('Explain binary search algorithm with complexity analysis')">
-                <h4>🔍 Algorithm Analysis</h4>
-                <p>Learn about time and space complexity with detailed explanations</p>
-              </div>
-              <div class="suggestion-card" onclick="askQuestion('Show me how to implement a binary tree in Python')">
-                <h4>💻 Code Implementation</h4>
-                <p>Get clean, well-commented code in your preferred language</p>
-              </div>
-              <div class="suggestion-card" onclick="askQuestion('What are the best practices for solving dynamic programming problems?')">
-                <h4>🎯 Problem Solving</h4>
-                <p>Discover patterns and techniques for interview success</p>
-              </div>
-              <div class="suggestion-card" onclick="askQuestion('Give me practice problems for graph traversal')">
-                <h4>📝 Practice Problems</h4>
-                <p>Find curated problems to strengthen your skills</p>
-              </div>
+        <div class="auth-container">
+            <div class="auth-icon">
+                <div class="laptop-icon"></div>
+                <div class="lock-icon">🔒</div>
             </div>
-          </div>
-        </div>
-      </div>
-      
-
-      <!-- Input Area -->
-      <div class="input-area">
-        <div class="input-container">
-          <div class="input-wrapper">
-            <input
-              type="text"
-              class="chat-input"
-              id="chatInput"
-              placeholder="Ask about any DSA concept... (e.g., 'Explain Dijkstra&apos;s algorithm')"
-            />
-            <button class="send-button" id="sendButton">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M22 2L2 8.67L9.18 11.5L12 18.68L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              Send
+            <h2 class="auth-title">Welcome to <span class="problem-text">DSA Mentor</span></h2>
+            <p class="auth-subtitle">Sign in to unlock personalized learning and save your progress</p>
+            
+            <button class="login-btn" onclick="window.location.href='/login'">
+                <span class="google-icon"></span>
+                Continue with Google
             </button>
-          </div>
+            
+            <div class="feature-list">
+                <div class="feature-item">✨ Personalized learning paths</div>
+                <div class="feature-item">📚 Save important conversations</div>
+                <div class="feature-item">🎯 Track your progress</div>
+                <div class="feature-item">🔄 Sync across devices</div>
+            </div>
         </div>
-      </div>
     </div>
-  </div>
 
-  <!-- Share Modal -->
-  <div class="modal-overlay" id="shareModal">
-    <div class="modal">
-      <div class="modal-header">Share Chat</div>
-      <div class="modal-content">
-        <p>Share this conversation with others:</p>
-        <div style="display: flex; gap: 8px; margin-top: 12px;">
-          <input
-            type="text"
-            id="shareLink"
-            readonly
-            style="flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-secondary);"
-            value="https://dsa-mentor.com/chat/abc123"
-          />
-          <button
-            onclick="copyShareLink()"
-            style="padding: 8px 12px; background: var(--primary); color: white; border: none; border-radius: var(--radius-md); cursor: pointer;"
-          >
-            Copy
-          </button>
+    <!-- Share Modal -->
+    <div class="modal-overlay" id="shareModal">
+        <div class="modal">
+            <div class="modal-header">Share Conversation</div>
+            <div class="modal-content">
+                <p>Share this conversation with others using the link below:</p>
+                <input type="text" id="shareLink" readonly class="share-input">
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-secondary" onclick="closeShareModal()">Cancel</button>
+                <button class="modal-btn" onclick="copyShareLink()">Copy Link</button>
+            </div>
         </div>
-      </div>
-      <div class="modal-actions">
-        <button class="modal-btn modal-btn-secondary" onclick="closeModal('shareModal')">Cancel</button>
-      </div>
     </div>
-  </div>
 
-  <!-- Video Modal -->
-  <div class="video-modal" id="videoModal">
-    <div class="video-modal-content">
-      <div class="video-modal-header">
-        <h3 class="video-modal-title" id="videoModalTitle">Video Tutorial</h3>
-        <button class="video-modal-close" onclick="closeVideoModal()">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </div>
-      <iframe class="video-embed" id="videoEmbed" src="" allowfullscreen></iframe>
+    <!-- Video Modal -->
+    <div class="video-modal" id="videoModal">
+        <div class="video-modal-content">
+            <button class="video-modal-close" onclick="closeVideoModal()">&times;</button>
+            <div class="video-modal-header">
+                <h3 class="video-modal-title" id="videoModalTitle">Learning Video</h3>
+            </div>
+            <div class="video-embed-container">
+                <iframe id="videoEmbed" class="video-embed" frameborder="0" allowfullscreen></iframe>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <!-- Toast Notification -->
-  <div class="toast" id="toast"></div>
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
 
-  <!-- Inject server user for JS -->
-  <script>
-  // Pass server data to JavaScript
-  window.SERVER_USER = {{ user|tojson|safe }};
-  window.SHARED_THREAD_ID = {{ shared_thread_id|tojson|safe if shared_thread_id else 'null' }};
-  
-  function handleLogin() {
-    // Store current thread ID before login redirect
-    const currentThreadId = window.app?.state?.currentThreadId || window.SHARED_THREAD_ID;
-    if (currentThreadId) {
-      sessionStorage.setItem('dsa_pending_thread', currentThreadId);
-    }
-    
-    // Redirect to login with next parameter for proper redirect after login
-    const currentUrl = window.location.href;
-    const loginUrl = currentUrl === window.location.origin + '/' ? '/login' : `/login?next=${encodeURIComponent(currentUrl)}`;
-    window.location.href = loginUrl;
-  }
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>Initializing DSA Mentor...</p>
+    </div>
 
-  // Handle shared thread loading
-  document.addEventListener('DOMContentLoaded', function() {
-    // Wait for JavaScript modules to be fully loaded
-    function waitForAppModules() {
-      if (window.app?.state && window.app?.render && window.app?.util) {
-        // If there's a shared thread ID, use it
-        if (window.SHARED_THREAD_ID) {
-          window.app.state.currentThreadId = window.SHARED_THREAD_ID;
-          window.app.util.updateShareLink();
-          
-          // Load shared thread content if user is authenticated
-          if (window.SERVER_USER?.is_authenticated) {
-            loadSharedThread(window.SHARED_THREAD_ID);
-          }
-        }
+    <!-- Scripts -->
+    <script>
+        // Initialize user data from server
+        window.SERVER_USER = {{ user|tojson|safe if user else '{"is_authenticated": false}' }};
         
-        // Restore thread after login
-        const pendingThread = sessionStorage.getItem('dsa_pending_thread');
-        if (pendingThread && window.SERVER_USER?.is_authenticated) {
-          sessionStorage.removeItem('dsa_pending_thread');
-          window.app.state.currentThreadId = pendingThread;
-          window.app.util.updateShareLink();
-          
-          // Load the shared thread content
-          if (pendingThread.startsWith('thread_')) {
-            loadSharedThread(pendingThread);
-          }
-        }
-      } else {
-        // Wait a bit more for modules to load
-        setTimeout(waitForAppModules, 200);
-      }
-    }
+        // Global configuration
+        window.APP_CONFIG = {
+            apiBaseUrl: '{{ request.url_root.rstrip("/") }}',
+            maxQueryLength: 2000,
+            streamingEnabled: true,
+            version: '2.0.0'
+        };
+    </script>
     
-    // Start waiting for modules
-    waitForAppModules();
-  });
-
-  // Global function to load shared thread content
-  window.loadSharedThread = function(threadId) {
-    if (!window.SERVER_USER?.is_authenticated) {
-      return; // User needs to login first
-    }
-
-    console.log('Loading shared thread:', threadId);
-
-    fetch(`/api/thread/${threadId}`)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        console.log('Shared thread data:', data);
-        
-        if (data.messages && data.messages.length > 0) {
-          // Hide welcome screen
-          const welcomeScreen = document.getElementById('welcomeScreen');
-          if (welcomeScreen) {
-            welcomeScreen.style.display = 'none';
-          }
-          
-          // Display messages using the correct MessageRenderer
-          if (window.app?.render) {
-            data.messages.forEach(msg => {
-              if (msg.sender === 'user') {
-                window.app.render.addMessage('user', msg.content);
-              } else if (msg.sender === 'assistant') {
-                window.app.render.addBotResponse(msg.content);
-              }
-            });
-          } else {
-            console.error('MessageRenderer not available yet');
-            // Fallback: manually create message elements
-            const chatContent = document.getElementById('chatContent');
-            if (chatContent) {
-              data.messages.forEach(msg => {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${msg.sender}-message`;
-                messageDiv.innerHTML = `
-                  <div class="message-content">
-                    <p>${msg.content}</p>
-                  </div>
-                `;
-                chatContent.appendChild(messageDiv);
-              });
+    <!-- Main Application Scripts -->
+    <script src="/static/app-auth.js" defer></script>
+    <script src="/static/app-chat.js" defer></script>
+    
+    <!-- Additional Features -->
+    <script>
+        // Suggestion handler
+        function sendSuggestion(text) {
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput && !chatInput.disabled) {
+                chatInput.value = text;
+                chatInput.focus();
+                // Trigger send if user is authenticated
+                if (window.app && window.app.auth && window.app.auth.isAuthenticated()) {
+                    window.sendMessage();
+                }
             }
-          }
-          
-          window.app.util.showToast('📂 Shared thread loaded!');
-        } else {
-          console.log('No messages found in shared thread');
-          window.app.util.showToast('📝 No messages in this shared thread');
         }
-      })
-      .catch(error => {
-        console.error('Error loading shared thread:', error);
-        window.app.util.showToast('❌ Failed to load shared thread: ' + error.message);
-      });
-  }
-    function toggleSidebar() {
-      const sidebar = document.querySelector('.sidebar');
-      const overlay = document.querySelector('.sidebar-overlay');
-      const body = document.body;
-      
-      sidebar.classList.toggle('open');
-      overlay.classList.toggle('active');
-      body.classList.toggle('sidebar-open');
-    }
-</script>
 
-  <!-- Load JS (order matters) -->
-  <script src="/static/js/app-auth.js" defer></script>
-  <script src="/static/js/app-chat.js" defer></script>
+        // Share modal functions
+        function closeShareModal() {
+            document.getElementById('shareModal').classList.remove('active');
+        }
+
+        function copyShareLink() {
+            const shareLink = document.getElementById('shareLink');
+            shareLink.select();
+            document.execCommand('copy');
+            showToast('Link copied to clipboard!');
+            closeShareModal();
+        }
+
+        // Video modal functions
+        function closeVideoModal() {
+            const modal = document.getElementById('videoModal');
+            const embed = document.getElementById('videoEmbed');
+            modal.classList.remove('active');
+            embed.src = '';
+        }
+
+        // Global toast function
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Auto-resize textarea
+        document.addEventListener('DOMContentLoaded', function() {
+            const textarea = document.getElementById('chatInput');
+            if (textarea) {
+                textarea.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                });
+                
+                // Enter key handler
+                textarea.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        window.sendMessage && window.sendMessage();
+                    }
+                });
+            }
+        });
+
+        // Service Worker Registration (for PWA functionality)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/static/sw.js')
+                    .then(function(registration) {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(function(registrationError) {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+    </script>
 </body>
 </html>
