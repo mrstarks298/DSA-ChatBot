@@ -1,40 +1,46 @@
-// ===== app-auth.js =====
+// ===== DSA MENTOR - UPDATED AUTH SYSTEM =====
 (() => {
   'use strict';
 
-  // ===== UTILITIES =====
+  // ===== CORE UTILITIES =====
   const $ = (id) => document.getElementById(id);
+  const $$ = (selector) => document.querySelectorAll(selector);
 
   const Utils = {
     escapeHtml(text) {
+      if (!text) return '';
       return String(text)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;');
+        .replace(/'/g, '&#39;');
     },
 
     generateThreadId() {
       const timestamp = Date.now();
-      const random = Math.random().toString(36).slice(2, 11);
+      const random = Math.random().toString(36).substring(2, 11);
       return `thread_${timestamp}_${random}`;
     },
 
-    scrollToBottom() {
-      const chatArea = $('chatArea');
-      if (chatArea) {
-        chatArea.scrollTop = chatArea.scrollHeight;
-      }
+    scrollToBottom(smooth = true) {
+      const behavior = smooth ? 'smooth' : 'auto';
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: behavior
+      });
     },
 
-    showToast(message) {
+    showToast(message, type = 'info', duration = 3000) {
       const toast = $('toast');
       if (!toast) return;
-      
+
       toast.textContent = message;
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 3000);
+      toast.className = `toast show ${type}`;
+      
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, duration);
     },
 
     updateShareLink(threadId) {
@@ -43,6 +49,24 @@
         const currentDomain = window.location.origin;
         shareLink.value = `${currentDomain}/chat/${threadId}`;
       }
+    },
+
+    formatError(error) {
+      if (typeof error === 'string') return error;
+      if (error?.message) return error.message;
+      return 'An unexpected error occurred';
+    },
+
+    debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
     }
   };
 
@@ -52,118 +76,272 @@
     savedMessages: new Map(),
     currentThreadId: Utils.generateThreadId(),
     authCheckInterval: null,
-    serverUser: window.SERVER_USER || { is_authenticated: false }
+    serverUser: window.SERVER_USER || { is_authenticated: false },
+    isInitialized: false,
+    authCheckInProgress: false,
+    config: window.APP_CONFIG || {}
   };
 
-  // Check for stored user data on initialization
-  function initializeUserFromStorage() {
-    try {
-      const storedUser = localStorage.getItem('user_data');
-      if (storedUser) {
-        const userData = JSON.parse(storedUser);
-        if (userData.authenticated && userData.name && userData.email) {
-          // Update server user data if not already set
-          if (!AppState.serverUser.is_authenticated) {
-            AppState.serverUser = {
-              is_authenticated: true,
-              name: userData.name,
-              email: userData.email,
-              picture: userData.picture
-            };
-          }
-        }
+  // ===== STORAGE MANAGER =====
+  const StorageManager = {
+    keys: {
+      USER_DATA: 'dsa_user_data',
+      THEME: 'dsa_theme',
+      SAVED_MESSAGES: 'dsa_saved_messages',
+      AUTH_TIMESTAMP: 'dsa_auth_check'
+    },
+
+    get(key, defaultValue = null) {
+      try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : defaultValue;
+      } catch (error) {
+        console.warn('Storage get error:', error);
+        return defaultValue;
       }
-    } catch (error) {
-      console.error('Error loading user data from storage:', error);
+    },
+
+    set(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+      } catch (error) {
+        console.warn('Storage set error:', error);
+        return false;
+      }
+    },
+
+    remove(key) {
+      try {
+        localStorage.removeItem(key);
+        return true;
+      } catch (error) {
+        console.warn('Storage remove error:', error);
+        return false;
+      }
+    },
+
+    clear() {
+      try {
+        Object.values(this.keys).forEach(key => {
+          localStorage.removeItem(key);
+        });
+        return true;
+      } catch (error) {
+        console.warn('Storage clear error:', error);
+        return false;
+      }
     }
-  }
+  };
 
   // ===== AUTHENTICATION MANAGER =====
   const AuthManager = {
+    init() {
+      this.loadStoredUser();
+      this.checkAuthentication();
+      this.setupEventListeners();
+    },
+
+    loadStoredUser() {
+      const storedUser = StorageManager.get(StorageManager.keys.USER_DATA);
+      if (storedUser && storedUser.is_authenticated && storedUser.name && storedUser.email) {
+        // Update server user data if not already set
+        if (!AppState.serverUser.is_authenticated) {
+          AppState.serverUser = {
+            is_authenticated: true,
+            id: storedUser.id || storedUser.user_id,
+            name: storedUser.name,
+            email: storedUser.email,
+            picture: storedUser.picture
+          };
+        }
+      }
+    },
+
+    setupEventListeners() {
+      // Listen for auth changes across tabs
+      window.addEventListener('storage', (e) => {
+        if (e.key === StorageManager.keys.USER_DATA) {
+          this.handleAuthChange();
+        }
+      });
+
+      // Visibility change - recheck auth when tab becomes visible
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && AppState.serverUser?.is_authenticated) {
+          this.performAuthCheck(true);
+        }
+      });
+    },
+
     checkAuthentication() {
       const user = AppState.serverUser;
       
       if (user?.is_authenticated && user.name && user.email) {
-        this.hideAuthOverlay();
-        this.hideSharedThreadBanner();
-        this.updateUserProfile(user);
-        this.enableChatInterface();
-        this.startPeriodicAuthCheck();
+        this.authenticatedState();
         return true;
       }
-      
-      // Check if we're on a shared thread
+
       const isSharedView = document.body.getAttribute('data-shared-view') === 'true';
       const sharedThreadId = document.body.getAttribute('data-shared-thread-id');
-      
+
       if (isSharedView && sharedThreadId && sharedThreadId !== 'null') {
-        this.showSharedThreadBanner();
-        this.disableChatInterface();
+        this.sharedViewState();
       } else {
-        this.showAuthOverlay();
-        this.disableChatInterface();
+        this.unauthenticatedState();
       }
-      
-      this.stopPeriodicAuthCheck();
+
       return false;
     },
 
+    authenticatedState() {
+      this.hideAuthOverlay();
+      this.hideSharedThreadBanner();
+      this.updateUserProfile(AppState.serverUser);
+      this.enableChatInterface();
+      this.startPeriodicAuthCheck();
+      
+      // Store user data
+      StorageManager.set(StorageManager.keys.USER_DATA, AppState.serverUser);
+      
+      console.log('✅ User authenticated:', AppState.serverUser.email);
+    },
+
+    unauthenticatedState() {
+      this.showAuthOverlay();
+      this.hideSharedThreadBanner();
+      this.disableChatInterface();
+      this.stopPeriodicAuthCheck();
+      
+      // Clear stored data
+      StorageManager.remove(StorageManager.keys.USER_DATA);
+      
+      console.log('🔒 User not authenticated');
+    },
+
+    sharedViewState() {
+      this.hideAuthOverlay();
+      this.showSharedThreadBanner();
+      this.disableChatInterface();
+      this.stopPeriodicAuthCheck();
+      
+      console.log('👥 Shared view mode');
+    },
+
     showAuthOverlay() {
-      $('authOverlay')?.classList.add('active');
+      const overlay = $('authOverlay');
+      if (overlay) {
+        overlay.classList.add('active');
+        // Focus management for accessibility
+        setTimeout(() => {
+          const loginBtn = overlay.querySelector('.login-btn');
+          if (loginBtn) loginBtn.focus();
+        }, 100);
+      }
     },
 
     hideAuthOverlay() {
-      $('authOverlay')?.classList.remove('active');
+      const overlay = $('authOverlay');
+      if (overlay) {
+        overlay.classList.remove('active');
+      }
     },
 
     showSharedThreadBanner() {
       const banner = $('sharedThreadBanner');
-      if (banner) banner.style.display = 'block';
+      if (banner) {
+        banner.style.display = 'block';
+        // Adjust main content margin
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+          mainContent.style.marginTop = '80px';
+        }
+      }
     },
 
     hideSharedThreadBanner() {
       const banner = $('sharedThreadBanner');
-      if (banner) banner.style.display = 'none';
+      if (banner) {
+        banner.style.display = 'none';
+        // Reset main content margin
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+          mainContent.style.marginTop = '0';
+        }
+      }
     },
 
     updateUserProfile(user) {
       const avatar = document.querySelector('.profile-avatar');
       const name = document.querySelector('.profile-name');
       const status = document.querySelector('.profile-status');
-      
+
       if (avatar && user.name) {
         avatar.textContent = user.name.charAt(0).toUpperCase();
+        avatar.style.background = 'var(--primary-gradient)';
       }
+
       if (name && user.name) {
         name.textContent = user.name;
       }
-      if (status && user.email) {
-        status.textContent = user.email;
+
+      if (status) {
+        if (user.email) {
+          status.textContent = user.email;
+        } else {
+          status.textContent = 'Authenticated';
+        }
       }
     },
 
     enableChatInterface() {
       const chatInput = $('chatInput');
       const sendButton = $('sendButton');
-      
-      if (chatInput) chatInput.disabled = false;
-      if (sendButton) sendButton.disabled = false;
+      const suggestionCards = $$('.suggestion-card');
+
+      if (chatInput) {
+        chatInput.disabled = false;
+        chatInput.placeholder = 'Ask me anything about Data Structures and Algorithms...';
+      }
+
+      if (sendButton) {
+        sendButton.disabled = false;
+      }
+
+      // Enable suggestion cards
+      suggestionCards.forEach(card => {
+        card.style.pointerEvents = 'auto';
+        card.style.opacity = '1';
+      });
     },
 
     disableChatInterface() {
       const chatInput = $('chatInput');
       const sendButton = $('sendButton');
-      
-      if (chatInput) chatInput.disabled = true;
-      if (sendButton) sendButton.disabled = true;
+      const suggestionCards = $$('.suggestion-card');
+
+      if (chatInput) {
+        chatInput.disabled = true;
+        chatInput.placeholder = 'Sign in to start learning...';
+      }
+
+      if (sendButton) {
+        sendButton.disabled = true;
+      }
+
+      // Disable suggestion cards
+      suggestionCards.forEach(card => {
+        card.style.pointerEvents = 'none';
+        card.style.opacity = '0.6';
+      });
     },
 
     startPeriodicAuthCheck() {
       if (AppState.authCheckInterval) {
         clearInterval(AppState.authCheckInterval);
       }
-      
-      // Only check auth every 5 minutes instead of 30 seconds to prevent excessive reloads
+
+      // Check auth every 5 minutes
       AppState.authCheckInterval = setInterval(() => {
         this.performAuthCheck();
       }, 300000); // 5 minutes
@@ -176,66 +354,105 @@
       }
     },
 
-    async performAuthCheck() {
-      // Prevent rapid successive auth checks
-      if (this.isCheckingAuth) {
+    async performAuthCheck(force = false) {
+      // Prevent concurrent auth checks
+      if (AppState.authCheckInProgress && !force) {
         console.log('Auth check already in progress, skipping...');
         return;
       }
-      
-      this.isCheckingAuth = true;
-      
+
+      AppState.authCheckInProgress = true;
+
       try {
-        const response = await fetch('/auth-status');
-        if (!response.ok) return;
-        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+        const response = await fetch('/auth-status', {
+          method: 'GET',
+          credentials: 'same-origin',
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          console.warn('Auth check failed:', response.status);
+          return;
+        }
+
         const data = await response.json();
         const wasAuthenticated = AppState.serverUser?.is_authenticated;
         const nowAuthenticated = data.is_authenticated;
-        
+
+        // Handle authentication state changes
         if (wasAuthenticated !== nowAuthenticated) {
-          console.log('Authentication status changed:', { was: wasAuthenticated, now: nowAuthenticated });
-          this.notifyAuthChange();
-          
-                  // Only reload if user actually logged out (not just status change)
-        if (!nowAuthenticated) {
-          console.log('User logged out, reloading page...');
-          location.reload();
-        } else {
-          // Update state without reload for login
-          console.log('User logged in, updating state without reload...');
-          AppState.serverUser = data;
-        }
+          console.log('Authentication status changed:', { 
+            was: wasAuthenticated, 
+            now: nowAuthenticated 
+          });
+
+          if (!nowAuthenticated) {
+            console.log('User logged out, updating state...');
+            AppState.serverUser = { is_authenticated: false };
+            this.checkAuthentication();
+            Utils.showToast('You have been logged out', 'warning');
+          } else {
+            console.log('User logged in, updating state...');
+            AppState.serverUser = {
+              is_authenticated: true,
+              id: data.user_id,
+              name: data.name,
+              email: data.email,
+              picture: data.picture
+            };
+            this.checkAuthentication();
+            Utils.showToast('Welcome back!', 'success');
+          }
           return;
         }
-        
-        if (nowAuthenticated && 
-            AppState.serverUser?.id && 
-            data.user_id && 
+
+        // Handle user ID changes (different user logged in)
+        if (nowAuthenticated && AppState.serverUser?.id && data.user_id && 
             AppState.serverUser.id !== data.user_id) {
-          console.log('User ID changed, updating state...');
-          // Update state instead of reloading
-          AppState.serverUser = data;
+          console.log('Different user logged in, updating state...');
+          AppState.serverUser = {
+            is_authenticated: true,
+            id: data.user_id,
+            name: data.name,
+            email: data.email,
+            picture: data.picture
+          };
+          this.updateUserProfile(AppState.serverUser);
+          StorageManager.set(StorageManager.keys.USER_DATA, AppState.serverUser);
         }
+
       } catch (error) {
-        console.error('Auth check failed:', error);
+        if (error.name === 'AbortError') {
+          console.warn('Auth check timed out');
+        } else {
+          console.error('Auth check failed:', error);
+        }
       } finally {
-        // Reset the flag after auth check completes
-        this.isCheckingAuth = false;
+        AppState.authCheckInProgress = false;
       }
     },
 
-    // Force authentication check on page load
     async forceAuthCheck() {
       try {
-        const response = await fetch('/auth-status');
+        const response = await fetch('/auth-status', {
+          method: 'GET',
+          credentials: 'same-origin'
+        });
+
         if (response.ok) {
           const data = await response.json();
           if (data.is_authenticated) {
-            // Update server user data
             AppState.serverUser = {
               is_authenticated: true,
-              id: data.user_id
+              id: data.user_id,
+              name: data.name,
+              email: data.email,
+              picture: data.picture
             };
             this.checkAuthentication();
           }
@@ -245,46 +462,69 @@
       }
     },
 
-    notifyAuthChange() {
+    handleAuthChange() {
+      console.log('Auth change detected across tabs');
+      this.loadStoredUser();
+      this.checkAuthentication();
+    },
+
+    async logout() {
       try {
-        // Update auth state without triggering reloads
-        const timestamp = String(Date.now());
-        localStorage.setItem('auth_change', timestamp);
-        
-        // Remove the key after a short delay to prevent storage events
-        setTimeout(() => {
-          localStorage.removeItem('auth_change');
-        }, 100);
+        const response = await fetch('/logout', {
+          method: 'POST',
+          credentials: 'same-origin'
+        });
+
+        if (response.ok) {
+          AppState.serverUser = { is_authenticated: false };
+          this.checkAuthentication();
+          StorageManager.clear();
+          Utils.showToast('Logged out successfully', 'info');
+        } else {
+          throw new Error('Logout failed');
+        }
       } catch (error) {
-        console.error('Failed to notify auth change:', error);
+        console.error('Logout error:', error);
+        Utils.showToast('Logout failed', 'error');
       }
+    },
+
+    isAuthenticated() {
+      return AppState.serverUser?.is_authenticated === true;
     }
   };
 
   // ===== THEME MANAGER =====
   const ThemeManager = {
-    THEME_KEY: 'dsa_theme',
-
     init() {
-      const preferredTheme = localStorage.getItem(this.THEME_KEY) || 'dark';
-      this.applyTheme(preferredTheme);
-      
+      const savedTheme = StorageManager.get(StorageManager.keys.THEME, 'light');
+      this.applyTheme(savedTheme);
+      this.setupThemeToggle();
+    },
+
+    setupThemeToggle() {
       const themeToggle = $('themeToggle');
-      themeToggle?.addEventListener('click', () => {
-        const currentTheme = document.body.getAttribute('data-theme') || 'light';
-        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-        this.applyTheme(newTheme);
-      });
+      if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+          this.toggleTheme();
+        });
+      }
+    },
+
+    toggleTheme() {
+      const currentTheme = document.body.getAttribute('data-theme') || 'light';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      this.applyTheme(newTheme);
     },
 
     applyTheme(theme) {
       document.body.setAttribute('data-theme', theme);
-      localStorage.setItem(this.THEME_KEY, theme);
-      
+      StorageManager.set(StorageManager.keys.THEME, theme);
+
       const themeToggle = $('themeToggle');
       const sunIcon = themeToggle?.querySelector('.sun-icon');
       const moonIcon = themeToggle?.querySelector('.moon-icon');
-      
+
       if (sunIcon && moonIcon) {
         if (theme === 'dark') {
           sunIcon.style.display = 'none';
@@ -294,726 +534,401 @@
           moonIcon.style.display = 'none';
         }
       }
+
+      // Update theme color meta tag
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeColorMeta) {
+        themeColorMeta.content = theme === 'dark' ? '#111827' : '#1B7EFE';
+      }
+    },
+
+    getCurrentTheme() {
+      return document.body.getAttribute('data-theme') || 'light';
     }
   };
 
-  // ===== MESSAGE RENDERER =====
-  const MessageRenderer = {
-    addMessage(sender, content) {
-      const chatContent = $('chatContent');
-      if (!chatContent) return;
+  // ===== SIDEBAR MANAGER =====
+  const SidebarManager = {
+    init() {
+      this.setupMobileMenuToggle();
+      this.setupSidebarInteractions();
+      this.setupNewThreadButton();
+    },
 
-      const messageId = `message-${AppState.currentThreadId}-${Date.now()}`;
-      const messageDiv = document.createElement('div');
-      messageDiv.className = `message ${sender}-message`;
-      messageDiv.id = messageId;
+    setupMobileMenuToggle() {
+      const mobileMenuBtn = $('mobileMenuBtn');
+      const sidebar = $('sidebar');
+      const overlay = $('sidebarOverlay');
 
-      if (sender === 'user') {
-        messageDiv.innerHTML = `
-          <div class="message-content">
-            <p>${Utils.escapeHtml(content)}</p>
-          </div>
-        `;
+      if (mobileMenuBtn && sidebar && overlay) {
+        mobileMenuBtn.addEventListener('click', () => {
+          this.toggleSidebar();
+        });
+
+        overlay.addEventListener('click', () => {
+          this.closeSidebar();
+        });
+      }
+    },
+
+    setupSidebarInteractions() {
+      // Handle escape key to close sidebar
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          this.closeSidebar();
+        }
+      });
+    },
+
+    setupNewThreadButton() {
+      const newThreadBtn = $('newThreadBtn');
+      if (newThreadBtn) {
+        newThreadBtn.addEventListener('click', () => {
+          this.startNewThread();
+        });
+      }
+    },
+
+    toggleSidebar() {
+      const sidebar = $('sidebar');
+      const overlay = $('sidebarOverlay');
+      const isOpen = sidebar?.classList.contains('open');
+
+      if (isOpen) {
+        this.closeSidebar();
       } else {
-        messageDiv.innerHTML = this.getBotMessageHTML(messageId, content);
+        this.openSidebar();
       }
-
-      chatContent.appendChild(messageDiv);
-      Utils.scrollToBottom();
-      return messageId;
     },
 
-    addBotMessage(content, messageId) {
-      const chatContent = $('chatContent');
-      if (!chatContent) return;
+    openSidebar() {
+      const sidebar = $('sidebar');
+      const overlay = $('sidebarOverlay');
 
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message bot-message';
-      messageDiv.id = messageId || `msg-${Date.now()}`;
-      messageDiv.innerHTML = this.getBotMessageHTML(messageDiv.id, content);
+      sidebar?.classList.add('open');
+      overlay?.classList.add('active');
+      document.body.classList.add('sidebar-open');
 
-      chatContent.appendChild(messageDiv);
-      Utils.scrollToBottom();
-      return messageDiv.id;
+      // Focus management
+      setTimeout(() => {
+        const firstFocusable = sidebar?.querySelector('button, [tabindex]:not([tabindex="-1"])');
+        if (firstFocusable) {
+          firstFocusable.focus();
+        }
+      }, 100);
     },
 
-    getBotMessageHTML(messageId, content = '') {
-      return `
-        <div class="message-header">
-          <div class="avatar bot-avatar">AI</div>
-          <span class="sender-name">DSA Mentor</span>
-        </div>
-        <div class="message-content">${Utils.escapeHtml(content)}</div>
-        <div class="message-actions">
-          <button class="action-btn" onclick="copyMessage('${messageId}')" title="Copy">📋</button>
-          <button class="action-btn" onclick="saveMessage('${messageId}')" title="Save for later">💾</button>
-          <button class="action-btn" onclick="shareMessage('${messageId}')" title="Share">🔗</button>
-        </div>
-      `;
+    closeSidebar() {
+      const sidebar = $('sidebar');
+      const overlay = $('sidebarOverlay');
+
+      sidebar?.classList.remove('open');
+      overlay?.classList.remove('active');
+      document.body.classList.remove('sidebar-open');
     },
 
-    addBotResponse(data) {
-      const chatContent = $('chatContent');
-      if (!chatContent) return;
-
-      const messageId = `message-${AppState.currentThreadId}-${Date.now()}`;
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message bot-message';
-      messageDiv.id = messageId;
-
-      let html = `
-        <div class="message-header">
-          <div class="avatar bot-avatar">AI</div>
-          <span class="sender-name">DSA Mentor</span>
-        </div>
-        <div class="message-content">
-      `;
-
-      // Build response content
-      if (data.best_book?.title) {
-        html += `<div class="concept-title">${Utils.escapeHtml(data.best_book.title)}</div>`;
-      }
-
-      if (data.summary) {
-        html += `<div class="concept-explanation">${Utils.escapeHtml(data.summary)}</div>`;
-      }
-
-      if (data.best_book?.content) {
-        const formattedContent = this.formatContent(data.best_book.content);
-        html += `<div class="concept-explanation">${formattedContent}</div>`;
-      }
-
-      // Add complexity badges if relevant
-      if (data.best_book?.content && /complexity|time|space/i.test(data.best_book.content)) {
-        html += `
-          <div class="complexity-badges">
-            <span class="complexity-badge">Time Complexity Analysis</span>
-            <span class="complexity-badge">Space Complexity Analysis</span>
-          </div>
-        `;
-      }
-
-      // Practice problems
-      if (Array.isArray(data.top_dsa) && data.top_dsa.length) {
-        html += this.buildPracticeProblemsHTML(data.top_dsa);
-      }
-
-      // Video suggestions
-      if (Array.isArray(data.video_suggestions) && data.video_suggestions.length) {
-        html += this.buildVideoSuggestionsHTML(data.video_suggestions);
-      }
-
-      html += `
-        </div>
-        <div class="message-actions">
-          <button class="action-btn" onclick="copyMessage('${messageId}')" title="Copy">📋</button>
-          <button class="action-btn" onclick="saveMessage('${messageId}')" title="Save for later">💾</button>
-          <button class="action-btn" onclick="shareMessage('${messageId}')" title="Share">🔗</button>
-        </div>
-      `;
-
-      messageDiv.innerHTML = html;
-      chatContent.appendChild(messageDiv);
-      Utils.scrollToBottom();
-    },
-
-    buildPracticeProblemsHTML(problems) {
-      let html = `
-        <div class="practice-problems">
-          <div class="section-header">📝 Related Practice Problems</div>
-      `;
-
-      problems.forEach(problem => {
-        const title = `${problem.section || 'DSA'}: ${problem.question || ''}`;
-        const description = problem.description || 'Practice this fundamental concept to strengthen your understanding.';
-        
-        html += `
-          <div class="problem-card">
-            <div class="problem-title">
-              <span class="problem-section">${Utils.escapeHtml(title)}</span>
-            </div>
-            <div class="problem-description">${Utils.escapeHtml(description)}</div>
-            <div class="problem-links">
-              ${problem.article_link ? `<a href="${problem.article_link}" target="_blank" class="problem-link">Article</a>` : ''}
-              ${problem.practice_link ? `<a href="${problem.practice_link}" target="_blank" class="problem-link">Practice</a>` : ''}
-            </div>
-          </div>
-        `;
-      });
-
-      html += '</div>';
-      return html;
-    },
-
-    buildVideoSuggestionsHTML(videos) {
-      let html = `
-        <div class="video-suggestions">
-          <div class="section-header">🎥 Recommended Video Tutorials</div>
-      `;
-
-      videos.forEach(video => {
-        const title = video.title || 'Video Tutorial';
-        const topic = video.topic || 'DSA';
-        const description = video.description || video.subtopic || 'Learn this concept through video tutorial';
-        const difficulty = video.difficulty ? `<span class="video-difficulty">${Utils.escapeHtml(video.difficulty)}</span>` : '';
-        const duration = video.duration ? `<span>⏱️ ${Utils.escapeHtml(video.duration)}</span>` : '';
-
-        html += `
-          <div class="video-card">
-            <div class="video-header">
-              <div class="video-thumbnail">▶</div>
-              <div class="video-info">
-                <div class="video-title">${Utils.escapeHtml(title)}</div>
-                <div class="video-meta">
-                  <span>${Utils.escapeHtml(topic)}</span>
-                  ${difficulty}
-                  ${duration}
-                </div>
-                <div class="video-description">${Utils.escapeHtml(description)}</div>
-              </div>
-            </div>
-            <div class="video-actions">
-              ${video.video_url ? `<button class="video-btn" onclick="openVideoModal('${encodeURI(video.video_url)}','${Utils.escapeHtml(title)}')">Watch</button>` : ''}
-              ${video.video_url ? `<a href="${video.video_url}" target="_blank" class="video-btn video-btn-secondary">Open</a>` : ''}
-            </div>
-          </div>
-        `;
-      });
-
-      html += '</div>';
-      return html;
-    },
-
-    formatContent(content) {
-      if (!content) return '';
+    startNewThread() {
+      // Generate new thread ID
+      AppState.currentThreadId = Utils.generateThreadId();
       
-      return content
-        .replace(/\n/g, '<br>')
-        .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/```python\n([\s\S]*?)\n```/g, '<pre><code class="language-python">$1</code></pre>')
-        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/^# (.*)$/gm, '<h2>$1</h2>')
-        .replace(/^## (.*)$/gm, '<h3>$1</h3>')
-        .replace(/^### (.*)$/gm, '<h4>$1</h4>')
-        .replace(/^- (.*)$/gm, '<li>$1</li>')
-        .replace(/^\* (.*)$/gm, '<li>$1</li>')
-        .replace(/---/g, '<hr>')
-        .replace(/💡 \*\*Tips:\*\*/g, '<div class="tip-box">💡 <strong>Tips:</strong>')
-        .replace(/(\d+)\. /g, '<strong>$1.</strong> ')
-        .replace(/(?:^(?:<li>.*<\/li>\s*){1,})/gm, (match) => `<ul>${match}</ul>`);
-    },
-
-    addLoadingMessage() {
+      // Clear chat content
       const chatContent = $('chatContent');
-      if (!chatContent) return null;
+      if (chatContent) {
+        chatContent.innerHTML = '';
+      }
 
-      const messageId = `loading-${Date.now()}`;
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message bot-message';
-      messageDiv.id = messageId;
-      
-      messageDiv.innerHTML = `
-        <div class="message-header">
-          <div class="avatar bot-avatar">AI</div>
-          <span class="sender-name">DSA Mentor</span>
-        </div>
-        <div class="message-content">
-          <div class="loading-message">
-            <div class="loading-dots">
-              <div class="loading-dot"></div>
-              <div class="loading-dot"></div>
-              <div class="loading-dot"></div>
-            </div>
-            <span>Thinking...</span>
-          </div>
-        </div>
-      `;
+      // Show welcome screen
+      const welcomeScreen = $('welcomeScreen');
+      if (welcomeScreen) {
+        welcomeScreen.style.display = 'block';
+      }
 
-      chatContent.appendChild(messageDiv);
-      Utils.scrollToBottom();
-      return messageId;
-    },
+      // Reset first message flag
+      AppState.isFirstMessage = true;
 
-    removeLoadingMessage(messageId) {
-      if (!messageId) return;
-      const element = $(messageId);
-      if (element) element.remove();
+      // Clear chat input
+      const chatInput = $('chatInput');
+      if (chatInput) {
+        chatInput.value = '';
+        chatInput.focus();
+      }
+
+      // Close sidebar on mobile
+      this.closeSidebar();
+
+      Utils.showToast('Started new conversation', 'success');
     }
   };
 
   // ===== SAVED MESSAGES MANAGER =====
   const SavedMessagesManager = {
-    STORAGE_KEY: 'dsa_saved_messages',
+    init() {
+      this.loadSavedMessages();
+      this.setupClearButton();
+    },
 
     loadSavedMessages() {
-      try {
-        const rawData = localStorage.getItem(this.STORAGE_KEY);
-        const savedData = rawData ? JSON.parse(rawData) : {};
-        AppState.savedMessages = new Map(Object.entries(savedData));
-      } catch (error) {
-        console.error('Failed to load saved messages:', error);
-        AppState.savedMessages = new Map();
-      }
-      this.updateSavedMessagesList();
+      const saved = StorageManager.get(StorageManager.keys.SAVED_MESSAGES, []);
+      AppState.savedMessages = new Map(saved.map(item => [item.id, item]));
+      this.renderSavedMessages();
     },
 
-    saveSavedMessages() {
-      try {
-        const dataObject = Object.fromEntries(AppState.savedMessages);
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(dataObject));
-      } catch (error) {
-        console.error('Failed to save messages:', error);
-      }
-    },
-
-    saveMessage(messageId, title, content) {
-      const timestamp = new Date().toISOString();
-      const preview = this.createPreview(content);
-      
-      AppState.savedMessages.set(messageId, {
+    saveMessage(messageId, content, title) {
+      const message = {
         id: messageId,
-        title: title || 'Saved Message',
-        preview,
-        fullContent: content,
-        timestamp
-      });
-      
-      this.saveSavedMessages();
-      this.updateSavedMessagesList();
-      Utils.showToast('💾 Message saved successfully!');
+        title: title || content.substring(0, 50) + '...',
+        content: content,
+        timestamp: Date.now(),
+        threadId: AppState.currentThreadId
+      };
+
+      AppState.savedMessages.set(messageId, message);
+      this.persistSavedMessages();
+      this.renderSavedMessages();
+      Utils.showToast('Message saved', 'success');
     },
 
-    removeMessage(messageId) {
-      if (AppState.savedMessages.has(messageId)) {
-        AppState.savedMessages.delete(messageId);
-        this.saveSavedMessages();
-        this.updateSavedMessagesList();
-        Utils.showToast('Message removed from saved items!');
+    removeSavedMessage(messageId) {
+      if (AppState.savedMessages.delete(messageId)) {
+        this.persistSavedMessages();
+        this.renderSavedMessages();
+        Utils.showToast('Message removed', 'info');
       }
     },
 
-    clearAll() {
-      AppState.savedMessages.clear();
-      this.saveSavedMessages();
-      this.updateSavedMessagesList();
-      Utils.showToast('All saved messages cleared!');
+    clearAllSaved() {
+      if (AppState.savedMessages.size === 0) return;
+
+      if (confirm('Are you sure you want to clear all saved messages?')) {
+        AppState.savedMessages.clear();
+        this.persistSavedMessages();
+        this.renderSavedMessages();
+        Utils.showToast('All saved messages cleared', 'info');
+      }
     },
 
-    createPreview(content, maxLength = 150) {
-      const textContent = content.replace(/<[^>]*>/g, '').trim();
-      return textContent.length > maxLength 
-        ? textContent.substring(0, maxLength) + '...'
-        : textContent;
+    persistSavedMessages() {
+      const messagesArray = Array.from(AppState.savedMessages.values());
+      StorageManager.set(StorageManager.keys.SAVED_MESSAGES, messagesArray);
     },
 
-    updateSavedMessagesList() {
+    renderSavedMessages() {
       const savedList = $('savedList');
-      const emptySaved = $('emptySaved');
-      const clearSavedBtn = $('clearSavedBtn');
+      const clearBtn = $('clearSavedBtn');
       
       if (!savedList) return;
 
-      const messages = Array.from(AppState.savedMessages.values());
-      
+      const messages = Array.from(AppState.savedMessages.values())
+        .sort((a, b) => b.timestamp - a.timestamp);
+
       if (messages.length === 0) {
-        if (emptySaved) emptySaved.style.display = 'block';
-        if (clearSavedBtn) clearSavedBtn.style.display = 'none';
-        savedList.innerHTML = '';
-        if (emptySaved) savedList.appendChild(emptySaved);
+        savedList.innerHTML = `
+          <div class="empty-saved">
+            <div class="empty-saved-icon">📝</div>
+            <p>No saved messages yet</p>
+            <p>Save important conversations for later</p>
+          </div>
+        `;
+        if (clearBtn) clearBtn.style.display = 'none';
         return;
       }
 
-      if (emptySaved) emptySaved.style.display = 'none';
-      if (clearSavedBtn) clearSavedBtn.style.display = 'block';
-
-      messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      savedList.innerHTML = '';
-      
-      messages.forEach(message => {
-        const listItem = this.createSavedMessageListItem(message);
-        savedList.appendChild(listItem);
-      });
-    },
-
-    createSavedMessageListItem(message) {
-      const li = document.createElement('li');
-      li.className = 'saved-item';
-      
-      li.innerHTML = `
-        <div class="saved-item-content">
-          <div class="saved-item-title">${Utils.escapeHtml(message.title)}</div>
-          <div class="saved-item-preview">${Utils.escapeHtml(message.preview)}</div>
+      savedList.innerHTML = messages.map(message => `
+        <div class="saved-item" onclick="SavedMessagesManager.loadSavedMessage('${message.id}')">
+          <div class="saved-item-content">
+            <div class="saved-item-title">${Utils.escapeHtml(message.title)}</div>
+            <div class="saved-item-preview">${Utils.escapeHtml(message.content.substring(0, 100))}</div>
+          </div>
+          <button class="saved-item-delete" onclick="event.stopPropagation(); SavedMessagesManager.removeSavedMessage('${message.id}')" title="Delete saved message">
+            ✕
+          </button>
         </div>
-        <button class="saved-item-delete" title="Remove">✖</button>
-      `;
+      `).join('');
 
-      li.addEventListener('click', (e) => {
-        if (e.target.closest('.saved-item-delete')) {
-          this.removeMessage(message.id);
-        } else {
-          this.showSavedMessage(message);
-        }
-      });
-
-      return li;
+      if (clearBtn) clearBtn.style.display = 'block';
     },
 
-    showSavedMessage(message) {
-      const welcomeScreen = $('welcomeScreen') || document.querySelector('.welcome-screen');
-      if (welcomeScreen && welcomeScreen.style.display !== 'none') {
-        welcomeScreen.style.display = 'none';
-        AppState.isFirstMessage = false;
+    loadSavedMessage(messageId) {
+      const message = AppState.savedMessages.get(messageId);
+      if (message) {
+        // This would typically load the saved conversation
+        // For now, just show the content
+        Utils.showToast('Loading saved message...', 'info');
+        console.log('Loading saved message:', message);
       }
-      this.addSavedMessageToChat(message);
     },
 
-    addSavedMessageToChat(message) {
-      const chatContent = $('chatContent');
-      if (!chatContent) return;
+    setupClearButton() {
+      const clearBtn = $('clearSavedBtn');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+          this.clearAllSaved();
+        });
+      }
+    }
+  };
 
-      const messageId = `restored-${message.id}`;
+  // ===== MESSAGE RENDERER =====
+  const MessageRenderer = {
+    addMessage(sender, content, messageId = null) {
+      const chatContent = $('chatContent');
+      if (!chatContent) return null;
+
+      const id = messageId || `message-${AppState.currentThreadId}-${Date.now()}`;
       const messageDiv = document.createElement('div');
-      messageDiv.className = 'message bot-message';
-      messageDiv.id = messageId;
-      
-      const formattedDate = new Date(message.timestamp).toLocaleDateString();
-      
-      messageDiv.innerHTML = `
-        <div class="message-header">
-          <div class="avatar bot-avatar" style="background:#9333EA;">📌</div>
-          <span class="sender-name">Saved Message</span>
-          <span style="font-size:12px;color:var(--text-muted);margin-left:auto;">
-            Saved ${formattedDate}
-          </span>
-        </div>
-        <div class="message-content">${Utils.escapeHtml(message.fullContent || message.preview)}</div>
-        <div class="message-actions">
-          <button class="action-btn" onclick="copyMessage('${messageId}')" title="Copy">📋</button>
-          <button class="action-btn" onclick="shareMessage('${messageId}')" title="Share">🔗</button>
-        </div>
-      `;
+      messageDiv.className = `message ${sender}-message`;
+      messageDiv.id = id;
+
+      if (sender === 'user') {
+        messageDiv.innerHTML = `
+          <div class="message-content">${Utils.escapeHtml(content)}</div>
+        `;
+      } else {
+        messageDiv.innerHTML = this.getBotMessageHTML(id, content);
+      }
 
       chatContent.appendChild(messageDiv);
       Utils.scrollToBottom();
-      Utils.showToast('💾 Saved message restored to chat!');
-    }
-  };
-
-  // ===== VIDEO MODAL HANDLER =====
-  const VideoModalHandler = {
-    extractYouTubeID(url) {
-      if (!url) return null;
-      
-      const patterns = [
-        /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/,
-        /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([a-zA-Z0-9_-]+)/,
-        /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]+)/,
-        /(?:https?:\/\/)?(?:www\.)?youtube\.com\/v\/([a-zA-Z0-9_-]+)/
-      ];
-
-      for (const pattern of patterns) {
-        const match = url.match(pattern);
-        if (match && match[1]) return match[1];
-      }
-      return null;
+      return id;
     },
 
-    openVideoModal(videoUrl, title) {
-      const youtubeId = this.extractYouTubeID(videoUrl);
-      const videoEmbed = $('videoEmbed');
-      const videoModalTitle = $('videoModalTitle');
-      const videoModal = $('videoModal');
-
-      if (youtubeId) {
-        const embedUrl = `https://www.youtube.com/embed/${youtubeId}`;
-        if (videoEmbed) videoEmbed.src = embedUrl;
-        if (videoModalTitle) videoModalTitle.textContent = title || 'Video Tutorial';
-        if (videoModal) videoModal.classList.add('active');
-      } else {
-        window.open(videoUrl, '_blank');
-      }
-    },
-
-    closeVideoModal() {
-      const videoModal = $('videoModal');
-      const videoEmbed = $('videoEmbed');
-      
-      if (videoModal) videoModal.classList.remove('active');
-      if (videoEmbed) videoEmbed.src = '';
-    }
-  };
-
-  // ===== THREAD MANAGEMENT =====
-  const ThreadManager = {
-    startNewThread() {
-      AppState.currentThreadId = Utils.generateThreadId();
-      AppState.isFirstMessage = true;
-
+    addBotMessage(content, messageId) {
       const chatContent = $('chatContent');
-      if (chatContent) {
-        chatContent.innerHTML = this.getWelcomeScreenHTML();
-      }
+      if (!chatContent) return null;
 
-      Utils.updateShareLink(AppState.currentThreadId);
-      Utils.showToast('🆕 New thread started!');
-      
-      const chatInput = $('chatInput');
-      if (chatInput) chatInput.focus();
+      const id = messageId || `msg-${Date.now()}`;
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message bot-message';
+      messageDiv.id = id;
+      messageDiv.innerHTML = this.getBotMessageHTML(id, content);
+
+      chatContent.appendChild(messageDiv);
+      Utils.scrollToBottom();
+      return id;
     },
 
-    getWelcomeScreenHTML() {
+    getBotMessageHTML(messageId, content = '') {
       return `
-        <div class="welcome-screen" id="welcomeScreen">
-          <h1 class="welcome-title">Welcome to DSA Mentor</h1>
-          <p class="welcome-subtitle">Your AI-powered companion for mastering Data Structures and Algorithms</p>
-          <div class="suggestion-cards">
-            <div class="suggestion-card" onclick="askQuestion('Explain binary search algorithm with complexity analysis')">
-              <h4>🔍 Algorithm Analysis</h4>
-              <p>Learn about time and space complexity with detailed explanations</p>
-            </div>
-            <div class="suggestion-card" onclick="askQuestion('Show me how to implement a binary tree in Python')">
-              <h4>💻 Code Implementation</h4>
-              <p>Get clean, well-commented code in your preferred language</p>
-            </div>
-            <div class="suggestion-card" onclick="askQuestion('What are the best practices for solving dynamic programming problems?')">
-              <h4>🎯 Problem Solving</h4>
-              <p>Discover patterns and techniques for interview success</p>
-            </div>
-            <div class="suggestion-card" onclick="askQuestion('Give me practice problems for graph traversal')">
-              <h4>📝 Practice Problems</h4>
-              <p>Find curated problems to strengthen your skills</p>
-            </div>
-          </div>
+        <div class="message-content">${content}</div>
+        <div class="message-actions">
+          <button class="action-btn" onclick="MessageRenderer.copyMessage('${messageId}')" title="Copy message">
+            📋
+          </button>
+          <button class="action-btn" onclick="MessageRenderer.saveMessage('${messageId}')" title="Save message">
+            💾
+          </button>
+          <button class="action-btn" onclick="MessageRenderer.shareMessage('${messageId}')" title="Share message">
+            🔗
+          </button>
         </div>
       `;
-    }
-  };
+    },
 
-  // ===== NETWORK MANAGER =====
-  const NetworkManager = {
-    async sendMessage() {
-      const chatInput = $('chatInput');
-      const sendButton = $('sendButton');
+    copyMessage(messageId) {
+      const messageElement = $(messageId);
+      if (!messageElement) return;
+
+      const content = messageElement.querySelector('.message-content');
+      if (!content) return;
+
+      const text = content.textContent || content.innerText;
       
-      if (!AppState.serverUser?.is_authenticated) {
-        AuthManager.showAuthOverlay();
-        Utils.showToast('Please login to continue');
-        return;
-      }
-
-      const query = chatInput?.value.trim();
-      if (!query) return;
-
-      if (AppState.isFirstMessage) {
-        const welcomeScreen = $('welcomeScreen') || document.querySelector('.welcome-screen');
-        if (welcomeScreen) {
-          welcomeScreen.style.display = 'none';
-          AppState.isFirstMessage = false;
-        }
-      }
-
-      MessageRenderer.addMessage('user', query);
-      const loadingId = MessageRenderer.addLoadingMessage();
-      
-      if (chatInput) chatInput.value = '';
-      if (sendButton) sendButton.disabled = true;
-
-      try {
-        const response = await fetch('/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            query, 
-            thread_id: AppState.currentThreadId 
-          })
-        });
-
-        if (response.status === 401 || response.status === 403) {
-          MessageRenderer.removeLoadingMessage(loadingId);
-          AuthManager.showAuthOverlay();
-          Utils.showToast('Session expired. Please login again.');
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        MessageRenderer.removeLoadingMessage(loadingId);
-        
-        if (data.thread_id) {
-          AppState.currentThreadId = data.thread_id;
-          Utils.updateShareLink(AppState.currentThreadId);
-        }
-        
-        MessageRenderer.addBotResponse(data);
-        
-      } catch (error) {
-        MessageRenderer.removeLoadingMessage(loadingId);
-        let errorMessage = 'Sorry, I encountered an error. Please try again.';
-        
-        if (String(error.message).includes('Failed to fetch')) {
-          errorMessage = 'Network error. Please check your connection and try again.';
-        }
-        
-        MessageRenderer.addMessage('bot', errorMessage);
-        console.error('Send message error:', error);
-      } finally {
-        if (sendButton) sendButton.disabled = false;
-        if (chatInput) chatInput.focus();
-      }
-    }
-  };
-
-  // ===== GLOBAL FUNCTIONS =====
-  window.askQuestion = function(question) {
-    if (!AppState.serverUser?.is_authenticated) {
-      AuthManager.showAuthOverlay();
-      Utils.showToast('Please login to ask questions');
-      return;
-    }
-    
-    const chatInput = $('chatInput');
-    if (chatInput) {
-      chatInput.value = question;
-      // Use the global sendMessage function from app-chat.js
-      if (typeof window.sendMessage === 'function') {
-        window.sendMessage();
-      } else {
-        // Fallback to NetworkManager if sendMessage is not available
-        NetworkManager.sendMessage();
-      }
-    }
-  };
-
-  // Note: Streaming sender is defined in app-chat.js; do not override here
-  window.openVideoModal = VideoModalHandler.openVideoModal.bind(VideoModalHandler);
-  window.closeVideoModal = VideoModalHandler.closeVideoModal.bind(VideoModalHandler);
-  window.removeSavedMessage = SavedMessagesManager.removeMessage.bind(SavedMessagesManager);
-  
-  // Share-link helper used by index.html share modal
-  window.copyShareLink = function() {
-    try {
-      const input = $('shareLink');
-      if (!input) return;
-      const value = input.value;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(value).then(() => Utils.showToast('🔗 Link copied!'));
+        navigator.clipboard.writeText(text).then(() => {
+          Utils.showToast('Message copied to clipboard', 'success');
+        }).catch(err => {
+          console.error('Copy failed:', err);
+          this.fallbackCopy(text);
+        });
       } else {
-        input.select();
-        input.setSelectionRange(0, 99999);
-        document.execCommand('copy');
-        Utils.showToast('🔗 Link copied!');
+        this.fallbackCopy(text);
       }
-    } catch (e) {
-      console.error('Copy failed', e);
-      Utils.showToast('❌ Failed to copy');
+    },
+
+    fallbackCopy(text) {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      try {
+        document.execCommand('copy');
+        Utils.showToast('Message copied to clipboard', 'success');
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        Utils.showToast('Copy failed', 'error');
+      }
+      
+      document.body.removeChild(textArea);
+    },
+
+    saveMessage(messageId) {
+      const messageElement = $(messageId);
+      if (!messageElement) return;
+
+      const content = messageElement.querySelector('.message-content');
+      if (!content) return;
+
+      const text = content.textContent || content.innerText;
+      const title = text.substring(0, 50) + (text.length > 50 ? '...' : '');
+
+      SavedMessagesManager.saveMessage(messageId, text, title);
+    },
+
+    shareMessage(messageId) {
+      // This would implement message sharing functionality
+      Utils.showToast('Share functionality coming soon', 'info');
     }
   };
 
-  // ===== EVENT LISTENERS =====
-  function setupEventListeners() {
-    // Send message events are handled by app-chat.js (streaming). Avoid duplicates here.
-
-    // New thread
-    const newThreadBtn = $('newThreadBtn');
-    newThreadBtn?.addEventListener('click', ThreadManager.startNewThread);
-
-    // Clear saved messages
-    const clearSavedBtn = $('clearSavedBtn');
-    clearSavedBtn?.addEventListener('click', SavedMessagesManager.clearAll);
-
-    // Global keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        $('videoModal')?.classList.remove('active');
-        $('shareModal')?.classList.remove('active');
-      }
-    });
-
-    // Modal close events
-    document.addEventListener('click', (e) => {
-      if (e.target.classList?.contains('modal-overlay')) {
-        e.target.classList.remove('active');
-      }
-    });
-
-    // Storage change listener for auth sync - removed auto-reload to prevent infinite loops
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'auth_change') {
-        // Just update the auth state without reloading
-        console.log('Auth change detected, updating state...');
-        AuthManager.checkAuthentication();
-      }
-    });
-
-    // Before unload cleanup
-    window.addEventListener('beforeunload', () => {
-      AuthManager.stopPeriodicAuthCheck();
-    });
-  }
-
-  // ===== PUBLIC API =====
-  window.app = window.app || {};
-  window.app.state = AppState;
-  window.app.util = Utils;
-  window.app.auth = AuthManager;
-  window.app.render = MessageRenderer;
-  window.app.saved = SavedMessagesManager;
-  window.app.video = VideoModalHandler;
+  // ===== GLOBAL APP OBJECT =====
+  window.app = {
+    state: AppState,
+    util: Utils,
+    auth: AuthManager,
+    theme: ThemeManager,
+    sidebar: SidebarManager,
+    saved: SavedMessagesManager,
+    render: MessageRenderer,
+    storage: StorageManager
+  };
 
   // ===== INITIALIZATION =====
-  async function initialize() {
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 DSA Mentor initializing...');
+    
     try {
-      // Initialize user data from storage first
-      initializeUserFromStorage();
-      
+      // Initialize all managers
       ThemeManager.init();
-      setupEventListeners();
-      
-      // Force authentication check with server
-      await AuthManager.forceAuthCheck();
-      
-      AuthManager.checkAuthentication();
-      SavedMessagesManager.loadSavedMessages();
-      Utils.updateShareLink(AppState.currentThreadId);
-      
-      if ($('chatInput') && AppState.serverUser?.is_authenticated) {
-        $('chatInput').focus();
-      }
-      
-      console.log('DSA Mentor Auth module loaded successfully');
-      console.log('User authentication status:', AppState.serverUser?.is_authenticated);
-      
-      // Trigger shared thread loading if available
-      if (typeof window.loadSharedThread === 'function') {
-        const sharedThreadId = window.SHARED_THREAD_ID;
-        const pendingThread = sessionStorage.getItem('dsa_pending_thread');
-        
-        if (sharedThreadId && AppState.serverUser?.is_authenticated) {
-          console.log('Loading shared thread after auth init:', sharedThreadId);
-          window.loadSharedThread(sharedThreadId);
-        } else if (pendingThread && AppState.serverUser?.is_authenticated) {
-          console.log('Loading pending thread after auth init:', pendingThread);
-          sessionStorage.removeItem('dsa_pending_thread');
-          if (pendingThread.startsWith('thread_')) {
-            window.loadSharedThread(pendingThread);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to initialize app-auth:', error);
-      Utils.showToast('Initialization failed');
-    }
-  }
+      AuthManager.init();
+      SidebarManager.init();
+      SavedMessagesManager.init();
 
-  // Initialize when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-  } else {
-    initialize();
-  }
+      // Force initial auth check
+      setTimeout(() => {
+        AuthManager.forceAuthCheck();
+      }, 500);
+
+      AppState.isInitialized = true;
+      console.log('✅ DSA Mentor initialized successfully');
+      
+    } catch (error) {
+      console.error('❌ DSA Mentor initialization failed:', error);
+      Utils.showToast('Initialization failed', 'error');
+    }
+  });
+
+  // ===== ERROR HANDLING =====
+  window.addEventListener('error', (event) => {
+    console.error('Global error:', event.error);
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+  });
 
 })();
