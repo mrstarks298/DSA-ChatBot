@@ -1,4 +1,4 @@
-# Updated app/config.py - Fixed OAuth Redirect URIs
+# Updated app/config.py - Fixed Session Persistence Settings
 
 import os
 from datetime import timedelta
@@ -9,11 +9,14 @@ class BaseConfig:
     if not SECRET_KEY:
         raise ValueError("FLASK_SECRET_KEY environment variable is required")
 
-    # Session configuration for frontend compatibility
+    # ✅ ENHANCED: Session configuration for better persistence
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SAMESITE = "Lax"  # Critical: Changed from "Strict" to allow OAuth
     SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV") == "production"
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=2)  # Extended for better UX
+    SESSION_COOKIE_NAME = "dsa_session"    # ✅ NEW: Custom session cookie name
+    SESSION_COOKIE_PATH = "/"              # ✅ NEW: Cookie path
+    SESSION_COOKIE_DOMAIN = None           # ✅ NEW: Auto-detect domain
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)  # ✅ EXTENDED: Longer session
 
     # CORS configuration - essential for frontend
     ALLOWED_ORIGINS = os.environ.get(
@@ -32,10 +35,10 @@ class BaseConfig:
     GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 
-    # ✅ FIXED: Dynamic redirect URI with /auth prefix
+    # Dynamic redirect URI with /auth prefix
     REDIRECT_URI = os.environ.get(
         "REDIRECT_URI",
-        "https://dsa-chatbot-3rll.onrender.com/auth/oauth2callback"  # Added /auth
+        "https://dsa-chatbot-3rll.onrender.com/auth/oauth2callback"
     )
 
     # API URLs
@@ -106,15 +109,16 @@ class DevelopmentConfig(BaseConfig):
     DEBUG = True
     OAUTHLIB_INSECURE_TRANSPORT = "1"  # Allow HTTP for OAuth in development
 
-    # More permissive settings for development
+    # ✅ ENHANCED: Development session settings
     SESSION_COOKIE_SECURE = False
+    SESSION_COOKIE_SAMESITE = "Lax"
     MAX_QUERY_LENGTH = 5000  # Allow longer queries in development
     RATE_LIMIT_PER_MINUTE = 100  # More generous rate limiting
     TEMPLATES_AUTO_RELOAD = True
     JSONIFY_PRETTYPRINT_REGULAR = True  # Pretty print JSON in development
 
-    # Extended session for development convenience
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+    # ✅ EXTENDED: Even longer session for development convenience
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
 
     # Development-specific CORS (more permissive)
     ALLOWED_ORIGINS = os.environ.get(
@@ -122,20 +126,20 @@ class DevelopmentConfig(BaseConfig):
         "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000"
     )
 
-    # ✅ FIXED: Override redirect URI for development with /auth prefix
+    # Override redirect URI for development with /auth prefix
     REDIRECT_URI = os.environ.get(
         "REDIRECT_URI",
-        "http://localhost:5000/auth/oauth2callback"  # Added /auth
+        "http://localhost:5000/auth/oauth2callback"
     )
 
 class ProductionConfig(BaseConfig):
     """Production configuration with enhanced security"""
     DEBUG = False
 
-    # Ensure secure cookies in production
+    # ✅ FIXED: Production session settings - secure but OAuth-compatible
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SAMESITE = "Lax"  # Critical: Not "Strict" - allows OAuth redirects
 
     # Stricter settings for production
     MAX_QUERY_LENGTH = 1500
@@ -146,8 +150,8 @@ class ProductionConfig(BaseConfig):
     JSON_SORT_KEYS = False
     JSONIFY_PRETTYPRINT_REGULAR = False
 
-    # Production session settings
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=2)
+    # ✅ EXTENDED: Longer session for production (was 2 hours, now 8)
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
 
     # Production CORS (restrictive)
     ALLOWED_ORIGINS = os.environ.get(
