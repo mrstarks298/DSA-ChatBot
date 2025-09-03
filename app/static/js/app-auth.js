@@ -886,6 +886,21 @@
   };
 
   // ===== GLOBAL APP OBJECT =====
+
+window.app = {
+    state: AppState,
+    auth: AuthManager,
+    util: Utils,
+    storage: StorageManager,
+    theme: ThemeManager,
+    sidebar: SidebarManager,
+    saved: SavedMessagesManager
+};
+
+// Mark as initialized
+AppState.isInitialized = true;
+console.log('✅ App modules exposed to window.app');
+  
   window.app = {
     state: AppState,
     util: Utils,
@@ -921,6 +936,9 @@
       Utils.showToast('Initialization failed', 'error');
     }
   });
+  // Expose app object for other modules
+
+
 
   // ===== ERROR HANDLING =====
   window.addEventListener('error', (event) => {
