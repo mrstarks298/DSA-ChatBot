@@ -138,7 +138,7 @@ def login():
             "message": "Unable to start authentication process"
         }), 500
 
-@bp.route('/oauth2callback')
+@bp.route('/auth/oauth2callback')
 def oauth2callback():
     """Handle OAuth2 callback with enhanced security and error handling"""
     try:
