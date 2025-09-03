@@ -437,6 +437,25 @@ def logout():
         return redirect('/')
 
 # Session validation endpoint for frontend auth checks
+@bp.route('/auth-status')
+def auth_status():
+    """Check current authentication status"""
+    try:
+        if 'google_id' in session:
+            return jsonify({
+                "is_authenticated": True,
+                "user_id": session.get('google_id'),
+                "name": session.get('name'),
+                "email": session.get('email'),
+                "picture": session.get('picture')
+            })
+        else:
+            return jsonify({"is_authenticated": False})
+    except Exception as e:
+        logger.error(f"Auth status check error: {e}")
+        return jsonify({"is_authenticated": False, "error": str(e)})
+
+
 @bp.route('/validate-session')
 def validate_session():
     """Validate current session - used by frontend for auth checks"""
