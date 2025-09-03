@@ -1,248 +1,218 @@
-# config.py - Enhanced Configuration for DSA Mentor Production Deployment
-import os
-import logging
-from datetime import timedelta
-from urllib.parse import urlparse
+# Updated app/config.py - Fixed OAuth Redirect URIs
 
-logger = logging.getLogger(__name__)
+import os
+from datetime import timedelta
 
 class BaseConfig:
-    """Base configuration class with common settings"""
-    
     # Core Flask settings
     SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
     if not SECRET_KEY:
         raise ValueError("FLASK_SECRET_KEY environment variable is required")
-    
-    # Session configuration
+
+    # Session configuration for frontend compatibility
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV") == "production"
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=2)
-    
-    # CORS configuration for frontend integration
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=2)  # Extended for better UX
+
+    # CORS configuration - essential for frontend
     ALLOWED_ORIGINS = os.environ.get(
         "ALLOWED_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000,https://dsa-chatbot-3rll.onrender.com"
     )
-    
+
     # Database and API Keys
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
     HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
     HF_API_TOKEN_BACKUP = os.environ.get("HF_API_TOKEN_BACKUP")
-    
-    # Google OAuth configuration
+
+    # Google OAuth - required for frontend auth
     GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
-    
-    # Dynamic redirect URI with environment-based fallback
+
+    # ✅ FIXED: Dynamic redirect URI with /auth prefix
     REDIRECT_URI = os.environ.get(
         "REDIRECT_URI",
-        "https://dsa-chatbot-3rll.onrender.com/oauth2callback"
+        "https://dsa-chatbot-3rll.onrender.com/auth/oauth2callback"  # Added /auth
     )
-    
+
     # API URLs
     GROQ_CHAT_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    
-    # Application settings
+
+    # Frontend-specific settings
     MAX_QUERY_LENGTH = int(os.environ.get("MAX_QUERY_LENGTH", "2000"))
     RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
     STREAMING_ENABLED = os.environ.get("STREAMING_ENABLED", "true").lower() == "true"
-    
-    # Security settings
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+
+    # Content and security settings
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB for file uploads
     WTF_CSRF_ENABLED = True
     WTF_CSRF_TIME_LIMIT = 3600  # 1 hour
-    
-    # Logging configuration
+
+    # Logging
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
-    
-    # Template settings
-    TEMPLATES_AUTO_RELOAD = False  # Disable in production
-    
-    # JSON settings
-    JSONIFY_PRETTYPRINT_REGULAR = False
-    JSON_SORT_KEYS = False
-    
-    # Redis configuration (optional for caching)
-    REDIS_URL = os.environ.get("REDIS_URL")
-    
-    # Rate limiting configuration
-    RATELIMIT_STORAGE_URL = REDIS_URL or "memory://"
-    RATELIMIT_STRATEGY = "fixed-window"
-    RATELIMIT_HEADERS_ENABLED = True
-    
+
+    # Template settings for frontend
+    TEMPLATES_AUTO_RELOAD = True
+
+    # JSON settings for API responses
+    JSONIFY_PRETTYPRINT_REGULAR = False  # Disable in production
+    JSON_SORT_KEYS = False  # Maintain key order
+
     @classmethod
     def validate_config(cls):
-        """Validate required environment variables"""
+        """Validate required environment variables and provide helpful feedback"""
         required_vars = [
             "SUPABASE_URL", "SUPABASE_KEY", "GROQ_API_KEY",
             "HF_API_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"
         ]
-        
-        missing_vars = []
-        for var in required_vars:
-            if not getattr(cls, var):
-                missing_vars.append(var)
-        
+
+        missing_vars = [var for var in required_vars if not getattr(cls, var)]
         if missing_vars:
-            logger.warning(f"⚠️ Missing environment variables: {', '.join(missing_vars)}")
-            logger.warning("⚠️ Some features may not work without these variables")
-            return False
-        
-        logger.info("✅ All required environment variables are configured")
-        
-        # Validate configurations
+            print(f"⚠️ WARNING: Missing environment variables: {', '.join(missing_vars)}")
+            print("⚠️ Some features may not work properly without these variables.")
+            print("⚠️ Check your .env file or environment configuration.")
+        else:
+            print("✅ All required environment variables are configured.")
+
+        # Validate CORS configuration
         if cls.ALLOWED_ORIGINS:
             origins = [o.strip() for o in cls.ALLOWED_ORIGINS.split(',')]
-            logger.info(f"✅ CORS configured for origins: {origins}")
-        
+            print(f"✅ CORS configured for origins: {origins}")
+
+        # Validate OAuth configuration
         if cls.GOOGLE_CLIENT_ID and cls.GOOGLE_CLIENT_SECRET:
-            logger.info(f"✅ Google OAuth configured")
-            logger.info(f"✅ OAuth redirect URI: {cls.REDIRECT_URI}")
-        
+            print(f"✅ Google OAuth configured with client ID: {cls.GOOGLE_CLIENT_ID[:20]}...")
+            print(f"✅ OAuth redirect URI: {cls.REDIRECT_URI}")
+
+        # Validate database configuration
         if cls.SUPABASE_URL and cls.SUPABASE_KEY:
-            logger.info(f"✅ Supabase configured")
-        
+            print(f"✅ Supabase configured with URL: {cls.SUPABASE_URL[:30]}...")
+
+        # Validate API tokens
         if cls.GROQ_API_KEY:
-            logger.info(f"✅ Groq API configured")
-        
+            print(f"✅ Groq API configured")
         if cls.HF_API_TOKEN:
-            logger.info(f"✅ HuggingFace API configured")
-            if cls.HF_API_TOKEN_BACKUP:
-                logger.info(f"✅ HuggingFace backup token available")
-        
-        if cls.REDIS_URL:
-            logger.info(f"✅ Redis configured for caching and rate limiting")
-        else:
-            logger.info("ℹ️ Using in-memory rate limiting (Redis recommended for production)")
-        
+            print(f"✅ Hugging Face API configured")
+        if cls.HF_API_TOKEN_BACKUP:
+            print(f"✅ Hugging Face backup token available")
+
         return True
 
-
 class DevelopmentConfig(BaseConfig):
-    """Development configuration with relaxed settings"""
-    
+    """Development configuration with relaxed security for local development"""
     DEBUG = True
     OAUTHLIB_INSECURE_TRANSPORT = "1"  # Allow HTTP for OAuth in development
-    
+
     # More permissive settings for development
     SESSION_COOKIE_SECURE = False
-    MAX_QUERY_LENGTH = 5000
-    RATE_LIMIT_PER_MINUTE = 100
+    MAX_QUERY_LENGTH = 5000  # Allow longer queries in development
+    RATE_LIMIT_PER_MINUTE = 100  # More generous rate limiting
     TEMPLATES_AUTO_RELOAD = True
-    JSONIFY_PRETTYPRINT_REGULAR = True
-    
-    # Extended session for development
+    JSONIFY_PRETTYPRINT_REGULAR = True  # Pretty print JSON in development
+
+    # Extended session for development convenience
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
-    
-    # Development CORS (more permissive)
+
+    # Development-specific CORS (more permissive)
     ALLOWED_ORIGINS = os.environ.get(
         "ALLOWED_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000"
     )
-    
-    # Development redirect URI
+
+    # ✅ FIXED: Override redirect URI for development with /auth prefix
     REDIRECT_URI = os.environ.get(
         "REDIRECT_URI",
-        "http://localhost:5000/oauth2callback"
+        "http://localhost:5000/auth/oauth2callback"  # Added /auth
     )
-
 
 class ProductionConfig(BaseConfig):
     """Production configuration with enhanced security"""
-    
     DEBUG = False
-    
-    # Enhanced security for production
+
+    # Ensure secure cookies in production
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
-    
-    # Stricter settings
+
+    # Stricter settings for production
     MAX_QUERY_LENGTH = 1500
     RATE_LIMIT_PER_MINUTE = 20
-    
+
+    # Enhanced security for production
+    WTF_CSRF_ENABLED = True
+    JSON_SORT_KEYS = False
+    JSONIFY_PRETTYPRINT_REGULAR = False
+
     # Production session settings
     PERMANENT_SESSION_LIFETIME = timedelta(hours=2)
-    
+
     # Production CORS (restrictive)
     ALLOWED_ORIGINS = os.environ.get(
         "ALLOWED_ORIGINS",
         "https://dsa-chatbot-3rll.onrender.com"
     )
-    
-    # Enhanced logging for production
-    LOG_LEVEL = "WARNING"
-
 
 class TestingConfig(BaseConfig):
     """Testing configuration"""
-    
     TESTING = True
     DEBUG = True
     WTF_CSRF_ENABLED = False  # Disable CSRF for testing
-    
-    # Test-specific settings
+
+    # Use in-memory or test-specific configurations
     SESSION_COOKIE_SECURE = False
     OAUTHLIB_INSECURE_TRANSPORT = "1"
-    
-    # Test overrides
+
+    # Test-specific overrides
     MAX_QUERY_LENGTH = 1000
     RATE_LIMIT_PER_MINUTE = 1000  # No rate limiting in tests
-    
-    # Test credentials
+
+    # Override with test credentials if available
     GOOGLE_CLIENT_ID = os.environ.get("TEST_GOOGLE_CLIENT_ID", "test_client_id")
     GOOGLE_CLIENT_SECRET = os.environ.get("TEST_GOOGLE_CLIENT_SECRET", "test_client_secret")
-
 
 def get_config(name: str = None):
     """Get configuration class based on environment"""
     if name is None:
-        name = os.environ.get("FLASK_ENV", "production")
-    
+        name = os.environ.get("FLASK_ENV", "development")
+
     config_classes = {
         "development": DevelopmentConfig,
         "production": ProductionConfig,
         "testing": TestingConfig
     }
-    
-    config_class = config_classes.get(name, ProductionConfig)
-    
+
+    config_class = config_classes.get(name, DevelopmentConfig)
+
     # Validate configuration
     config_class.validate_config()
-    logger.info(f"🚀 Loading {name} configuration: {config_class.__name__}")
-    
+    print(f"🚀 Loading {name} configuration: {config_class.__name__}")
+
     return config_class
 
-
-# Helper functions
+# Additional helper functions for configuration management
 def get_database_url():
     """Get database URL with fallback"""
     url = os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_URL")
     if not url:
-        logger.warning("⚠️ No database URL configured")
+        print("⚠️ No database URL configured")
     return url
 
-
 def get_redis_url():
-    """Get Redis URL for caching"""
+    """Get Redis URL for caching (if needed)"""
     return os.environ.get("REDIS_URL")
-
 
 def is_production():
     """Check if running in production"""
     return os.environ.get("FLASK_ENV") == "production"
 
-
 def is_development():
     """Check if running in development"""
-    return os.environ.get("FLASK_ENV", "production") == "development"
+    return os.environ.get("FLASK_ENV", "development") == "development"
 
-
-# Export commonly used values
+# Export commonly used config values
 __all__ = [
     'BaseConfig',
     'DevelopmentConfig', 
