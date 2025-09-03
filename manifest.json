@@ -1,0 +1,9 @@
+{
+  "name": "DSA Mentor",
+  "short_name": "DSA Mentor",
+  "description": "AI-powered companion for mastering Data Structures and Algorithms",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1B7EFE"
+}
