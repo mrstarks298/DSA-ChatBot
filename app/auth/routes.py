@@ -6,11 +6,9 @@ from flask import request, session, redirect, jsonify, current_app, make_respons
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_auth_requests
-
 from . import bp
 
 logger = logging.getLogger("dsa-mentor")
-
 
 def _create_google_flow():
     """Create Google OAuth flow with comprehensive error handling"""
@@ -57,7 +55,6 @@ def _create_google_flow():
         logger.error(f"Failed to create Google OAuth flow: {e}")
         return None
 
-
 def _validate_session():
     """Validate user session with enhanced security checks"""
     try:
@@ -93,7 +90,6 @@ def _validate_session():
     except Exception as e:
         logger.error(f"Session validation error: {e}")
         return False, "Session validation failed"
-
 
 @bp.route('/login')
 def login():
@@ -141,7 +137,6 @@ def login():
             "error": "Authentication failed",
             "message": "Unable to start authentication process"
         }), 500
-
 
 @bp.route('/oauth2callback')
 def oauth2callback():
@@ -261,7 +256,6 @@ def oauth2callback():
             "message": "An unexpected error occurred during authentication"
         }), 500
 
-
 @bp.route('/logout', methods=['POST'])
 def logout():
     """Logout user and clear session"""
@@ -283,7 +277,6 @@ def logout():
             "error": "Logout failed",
             "message": "An error occurred during logout"
         }), 500
-
 
 @bp.route('/auth-status')
 def auth_status():
@@ -316,7 +309,6 @@ def auth_status():
             "error": "Unable to verify authentication status"
         }), 500
 
-
 @bp.route('/user-info')
 def user_info():
     """Get detailed user information (requires authentication)"""
@@ -344,13 +336,12 @@ def user_info():
             "error": "Unable to retrieve user information"
         }), 500
 
-
-# Rate limiting decorator for sensitive endpoints
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+# ✅ CORRECT: Apply rate limiting to existing functions
 from ..extensions import limiter
 
-# Apply rate limiting to authentication endpoints
-login.decorators.append(limiter.limit("10 per minute"))
-oauth2callback.decorators.append(limiter.limit("10 per minute"))
-logout.decorators.append(limiter.limit("20 per minute"))
+# Apply rate limiting using proper decorator syntax
+login = limiter.limit("10 per minute")(login)
+oauth2callback = limiter.limit("10 per minute")(oauth2callback)
+logout = limiter.limit("20 per minute")(logout)
+auth_status = limiter.limit("60 per minute")(auth_status)
+user_info = limiter.limit("30 per minute")(user_info)
