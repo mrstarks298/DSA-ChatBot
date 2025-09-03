@@ -139,7 +139,7 @@ def login():
         }), 500
 
 # ✅ FIXED: Route matches the config and Google Console setting
-@bp.route('/auth/oauth2callback')
+@bp.route('/oauth2callback')
 def oauth2callback():
     """Handle OAuth2 callback with enhanced security and error handling"""
     try:
