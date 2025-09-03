@@ -1,4 +1,5 @@
 // ===== DSA MENTOR - ENHANCED AUTHENTICATION SYSTEM WITH SESSION PERSISTENCE =====
+
 (() => {
     'use strict';
 
@@ -14,7 +15,7 @@
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
+                .replace(/'/g, '&#x27;');
         },
 
         generateThreadId() {
@@ -70,61 +71,51 @@
             };
         },
 
-        // ✅ NEW: Enhanced error logging with context
-        logError(context, error, additionalInfo = {}) {
-            const errorDetails = {
-                context,
-                error: this.formatError(error),
-                timestamp: new Date().toISOString(),
-                userAgent: navigator.userAgent,
-                url: window.location.href,
-                ...additionalInfo
-            };
-            console.error(`❌ [${context}]`, errorDetails);
-            return errorDetails;
-        },
-
-        // ✅ NEW: Network status detection
-        isOnline() {
-            return navigator.onLine;
-        },
-
-        // ✅ NEW: Retry mechanism for failed requests
-        async retryRequest(requestFn, maxRetries = 3, delay = 1000) {
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        // NEW: Retry function with exponential backoff
+        async retryFunction(fn, maxRetries = 3, baseDelay = 1000) {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    const result = await requestFn();
-                    return result;
+                    return await fn();
                 } catch (error) {
-                    if (attempt === maxRetries) {
-                        throw error;
-                    }
-                    console.warn(`Request failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay * attempt));
+                    if (attempt === maxRetries - 1) throw error;
+                    const delay = baseDelay * Math.pow(2, attempt);
+                    console.log(`Retry attempt ${attempt + 1}/${maxRetries} in ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
         }
     };
 
-    // ===== APPLICATION STATE =====
+    // ===== ENHANCED APPLICATION STATE =====
     const AppState = {
         isFirstMessage: true,
         savedMessages: new Map(),
         currentThreadId: Utils.generateThreadId(),
         authCheckInterval: null,
-        reconnectInterval: null,
         serverUser: window.SERVER_USER || { is_authenticated: false },
         isInitialized: false,
         authCheckInProgress: false,
-        lastAuthCheck: 0,
         config: window.APP_CONFIG || {},
-        connectionStatus: 'unknown', // 'online', 'offline', 'checking'
+        
+        // NEW: Enhanced state tracking
         sessionMetrics: {
             authChecks: 0,
             authFailures: 0,
-            sessionRestored: 0,
-            loginAttempts: 0
-        }
+            lastAuthCheck: null,
+            connectionStatus: 'online',
+            recoveryAttempts: 0
+        },
+        
+        // NEW: Connection monitoring
+        isOnline: navigator.onLine,
+        lastOnlineCheck: Date.now(),
+        
+        // NEW: Tab visibility tracking
+        isTabVisible: !document.hidden,
+        lastVisibilityChange: Date.now(),
+        
+        // NEW: Session backup
+        sessionBackup: null
     };
 
     // ===== ENHANCED STORAGE MANAGER =====
@@ -134,8 +125,8 @@
             THEME: 'dsa_theme',
             SAVED_MESSAGES: 'dsa_saved_messages',
             AUTH_TIMESTAMP: 'dsa_auth_check',
-            SESSION_BACKUP: 'dsa_session_backup',
-            CONNECTION_STATUS: 'dsa_connection_status'
+            SESSION_BACKUP: 'dsa_session_backup', // NEW
+            APP_STATE: 'dsa_app_state' // NEW
         },
 
         get(key, defaultValue = null) {
@@ -180,174 +171,218 @@
             }
         },
 
-        // ✅ NEW: Session backup and restore
-        backupSession() {
-            if (AppState.serverUser?.is_authenticated) {
+        // NEW: Backup and restore app state
+        backupState() {
+            try {
                 const backup = {
-                    user: AppState.serverUser,
                     timestamp: Date.now(),
-                    threadId: AppState.currentThreadId
+                    userData: this.get(this.keys.USER_DATA),
+                    threadId: AppState.currentThreadId,
+                    metrics: AppState.sessionMetrics
                 };
-                return this.set(this.keys.SESSION_BACKUP, backup);
+                this.set(this.keys.SESSION_BACKUP, backup);
+                return true;
+            } catch (error) {
+                console.warn('State backup error:', error);
+                return false;
             }
-            return false;
         },
 
-        restoreSession() {
-            const backup = this.get(this.keys.SESSION_BACKUP);
-            if (backup && backup.user && backup.timestamp) {
-                // Check if backup is not too old (24 hours)
-                const isValid = (Date.now() - backup.timestamp) < 24 * 60 * 60 * 1000;
-                if (isValid) {
-                    AppState.serverUser = backup.user;
+        restoreState() {
+            try {
+                const backup = this.get(this.keys.SESSION_BACKUP);
+                if (!backup) return false;
+
+                // Only restore if backup is recent (less than 1 hour)
+                if (Date.now() - backup.timestamp < 3600000) {
+                    if (backup.userData) {
+                        AppState.serverUser = backup.userData;
+                    }
                     if (backup.threadId) {
                         AppState.currentThreadId = backup.threadId;
                     }
-                    AppState.sessionMetrics.sessionRestored++;
+                    if (backup.metrics) {
+                        AppState.sessionMetrics = { ...AppState.sessionMetrics, ...backup.metrics };
+                    }
+                    console.log('✅ App state restored from backup');
                     return true;
                 }
+                return false;
+            } catch (error) {
+                console.warn('State restore error:', error);
+                return false;
             }
-            return false;
+        }
+    };
+
+    // ===== ENHANCED CONNECTION MANAGER =====
+    const ConnectionManager = {
+        init() {
+            this.setupConnectionListeners();
+            this.checkConnection();
+        },
+
+        setupConnectionListeners() {
+            window.addEventListener('online', () => {
+                console.log('🌐 Connection restored');
+                AppState.isOnline = true;
+                AppState.lastOnlineCheck = Date.now();
+                Utils.showToast('Connection restored', 'success');
+                
+                // Perform auth check when connection is restored
+                if (AppState.serverUser?.is_authenticated) {
+                    setTimeout(() => AuthManager.performAuthCheck(true), 1000);
+                }
+            });
+
+            window.addEventListener('offline', () => {
+                console.log('🌐 Connection lost');
+                AppState.isOnline = false;
+                Utils.showToast('Connection lost', 'warning');
+            });
+
+            // Check connection periodically
+            setInterval(() => {
+                this.checkConnection();
+            }, 30000); // Every 30 seconds
+        },
+
+        checkConnection() {
+            AppState.isOnline = navigator.onLine;
+            AppState.lastOnlineCheck = Date.now();
+        },
+
+        isConnected() {
+            return AppState.isOnline && navigator.onLine;
         }
     };
 
     // ===== ENHANCED AUTHENTICATION MANAGER =====
     const AuthManager = {
         init() {
+            console.log('🔐 Initializing authentication system...');
+            
+            // Try to restore state from backup
+            StorageManager.restoreState();
+            
             this.loadStoredUser();
-            this.setupConnectionMonitoring();
-            this.checkAuthentication();
             this.setupEventListeners();
+            this.setupVisibilityHandling();
+            
+            // Initial auth check
+            setTimeout(() => {
+                this.checkAuthentication();
+            }, 100);
         },
 
         loadStoredUser() {
-            // Try to restore from session backup first
-            if (StorageManager.restoreSession()) {
-                console.log('✅ Session restored from backup');
-            } else {
-                // Fallback to regular stored user
-                const storedUser = StorageManager.get(StorageManager.keys.USER_DATA);
-                if (storedUser && storedUser.is_authenticated && storedUser.name && storedUser.email) {
-                    if (!AppState.serverUser.is_authenticated) {
-                        AppState.serverUser = {
-                            is_authenticated: true,
-                            id: storedUser.id || storedUser.user_id,
-                            name: storedUser.name,
-                            email: storedUser.email,
-                            picture: storedUser.picture
-                        };
-                    }
+            const storedUser = StorageManager.get(StorageManager.keys.USER_DATA);
+            console.log('📱 Loading stored user:', storedUser);
+            
+            if (storedUser && storedUser.is_authenticated && storedUser.name && storedUser.email) {
+                if (!AppState.serverUser.is_authenticated) {
+                    AppState.serverUser = {
+                        is_authenticated: true,
+                        id: storedUser.id || storedUser.user_id,
+                        name: storedUser.name,
+                        email: storedUser.email,
+                        picture: storedUser.picture
+                    };
+                    console.log('✅ Restored user from storage:', AppState.serverUser.email);
                 }
             }
-        },
-
-        // ✅ NEW: Connection monitoring
-        setupConnectionMonitoring() {
-            window.addEventListener('online', () => {
-                AppState.connectionStatus = 'online';
-                console.log('🌐 Connection restored');
-                Utils.showToast('Connection restored', 'success');
-                // Perform auth check when coming back online
-                if (AppState.serverUser?.is_authenticated) {
-                    this.performAuthCheck(true);
-                }
-            });
-
-            window.addEventListener('offline', () => {
-                AppState.connectionStatus = 'offline';
-                console.log('📡 Connection lost');
-                Utils.showToast('Connection lost. Working offline...', 'warning', 5000);
-                this.stopPeriodicAuthCheck();
-            });
-
-            // Initial connection status
-            AppState.connectionStatus = navigator.onLine ? 'online' : 'offline';
         },
 
         setupEventListeners() {
             // Cross-tab communication
             window.addEventListener('storage', (e) => {
                 if (e.key === StorageManager.keys.USER_DATA) {
+                    console.log('🔄 Auth change detected across tabs');
                     this.handleAuthChange();
                 }
             });
 
-            // Page visibility changes
-            document.addEventListener('visibilitychange', () => {
-                if (!document.hidden && AppState.serverUser?.is_authenticated) {
-                    // Throttle auth checks - only if last check was more than 30 seconds ago
-                    const now = Date.now();
-                    if (now - AppState.lastAuthCheck > 30000) {
-                        this.performAuthCheck(true);
-                    }
-                }
+            // Page unload backup
+            window.addEventListener('beforeunload', () => {
+                StorageManager.backupState();
             });
 
-            // Window focus events
-            window.addEventListener('focus', () => {
-                if (AppState.serverUser?.is_authenticated && navigator.onLine) {
-                    // Perform auth check when window gains focus
+            // Error boundary
+            window.addEventListener('error', (event) => {
+                console.error('🚨 Global error caught:', event.error);
+                AppState.sessionMetrics.authFailures++;
+            });
+
+            window.addEventListener('unhandledrejection', (event) => {
+                console.error('🚨 Unhandled rejection:', event.reason);
+                AppState.sessionMetrics.authFailures++;
+            });
+        },
+
+        setupVisibilityHandling() {
+            document.addEventListener('visibilitychange', () => {
+                AppState.isTabVisible = !document.hidden;
+                AppState.lastVisibilityChange = Date.now();
+                
+                if (!document.hidden && AppState.serverUser?.is_authenticated) {
+                    console.log('👁️ Tab became visible, checking auth status');
                     this.performAuthCheck(true);
                 }
-            });
-
-            // ✅ NEW: Handle page unload - backup session
-            window.addEventListener('beforeunload', () => {
-                StorageManager.backupSession();
             });
         },
 
         checkAuthentication() {
+            console.log('🔍 Checking authentication state...');
             const user = AppState.serverUser;
             
             if (user?.is_authenticated && user.name && user.email) {
+                console.log('✅ User is authenticated:', user.email);
                 this.authenticatedState();
                 return true;
             }
 
+            // Check for shared view
             const isSharedView = document.body.getAttribute('data-shared-view') === 'true';
             const sharedThreadId = document.body.getAttribute('data-shared-thread-id');
 
             if (isSharedView && sharedThreadId && sharedThreadId !== 'null') {
+                console.log('👥 Shared view mode detected');
                 this.sharedViewState();
             } else {
+                console.log('🔒 User not authenticated');
                 this.unauthenticatedState();
             }
-
             return false;
         },
 
         authenticatedState() {
+            console.log('🎯 Setting authenticated state...');
             this.hideAuthOverlay();
             this.hideSharedThreadBanner();
             this.updateUserProfile(AppState.serverUser);
             this.enableChatInterface();
             this.startPeriodicAuthCheck();
-            
-            // Store user data and create backup
             StorageManager.set(StorageManager.keys.USER_DATA, AppState.serverUser);
-            StorageManager.backupSession();
-            
-            console.log('✅ User authenticated:', AppState.serverUser.email);
+            console.log('✅ User authenticated state set for:', AppState.serverUser.email);
         },
 
         unauthenticatedState() {
+            console.log('🔒 Setting unauthenticated state...');
             this.showAuthOverlay();
             this.hideSharedThreadBanner();
             this.disableChatInterface();
             this.stopPeriodicAuthCheck();
-
             StorageManager.remove(StorageManager.keys.USER_DATA);
-            StorageManager.remove(StorageManager.keys.SESSION_BACKUP);
-            console.log('🔒 User not authenticated');
+            console.log('🔒 Unauthenticated state set');
         },
 
         sharedViewState() {
+            console.log('👥 Setting shared view state...');
             this.hideAuthOverlay();
             this.showSharedThreadBanner();
             this.disableChatInterface();
             this.stopPeriodicAuthCheck();
-            console.log('👥 Shared view mode');
+            console.log('👥 Shared view state set');
         },
 
         showAuthOverlay() {
@@ -391,6 +426,8 @@
         },
 
         updateUserProfile(user) {
+            console.log('👤 Updating user profile for:', user?.email);
+            
             const avatar = document.querySelector('.profile-avatar');
             const name = document.querySelector('.profile-name');
             const status = document.querySelector('.profile-status');
@@ -398,12 +435,10 @@
             if (avatar && user.name) {
                 avatar.textContent = user.name.charAt(0).toUpperCase();
                 avatar.style.background = 'var(--primary-gradient)';
-                avatar.title = user.name;
             }
 
             if (name && user.name) {
                 name.textContent = user.name;
-                name.title = user.email;
             }
 
             if (status) {
@@ -412,6 +447,7 @@
         },
 
         enableChatInterface() {
+            console.log('💬 Enabling chat interface...');
             const chatInput = $('chatInput');
             const sendButton = $('sendButton');
             const suggestionCards = $$('.suggestion-card');
@@ -432,6 +468,7 @@
         },
 
         disableChatInterface() {
+            console.log('❌ Disabling chat interface...');
             const chatInput = $('chatInput');
             const sendButton = $('sendButton');
             const suggestionCards = $$('.suggestion-card');
@@ -451,121 +488,120 @@
             });
         },
 
-        // ✅ ENHANCED: Smart periodic auth checks
         startPeriodicAuthCheck() {
             if (AppState.authCheckInterval) {
                 clearInterval(AppState.authCheckInterval);
             }
-            
-            // Variable intervals based on activity and connection status
+
+            // Adaptive auth check intervals based on connection and visibility
             const getCheckInterval = () => {
-                if (!navigator.onLine) return 300000; // 5 minutes when offline
-                if (document.hidden) return 300000; // 5 minutes when tab is hidden
-                return 120000; // 2 minutes when active
+                if (!ConnectionManager.isConnected()) return 300000; // 5 minutes if offline
+                if (!AppState.isTabVisible) return 300000; // 5 minutes if tab hidden
+                return 120000; // 2 minutes if online and visible
             };
 
             AppState.authCheckInterval = setInterval(() => {
-                if (navigator.onLine && AppState.serverUser?.is_authenticated) {
-                    this.performAuthCheck();
-                }
+                this.performAuthCheck();
             }, getCheckInterval());
 
-            // Adjust interval based on visibility changes
-            document.addEventListener('visibilitychange', () => {
-                if (AppState.authCheckInterval) {
-                    clearInterval(AppState.authCheckInterval);
-                    AppState.authCheckInterval = setInterval(() => {
-                        if (navigator.onLine && AppState.serverUser?.is_authenticated) {
-                            this.performAuthCheck();
-                        }
-                    }, getCheckInterval());
-                }
-            });
+            console.log('⏰ Started periodic auth checks');
         },
 
         stopPeriodicAuthCheck() {
             if (AppState.authCheckInterval) {
                 clearInterval(AppState.authCheckInterval);
                 AppState.authCheckInterval = null;
+                console.log('⏰ Stopped periodic auth checks');
             }
         },
 
-        // ✅ ENHANCED: Auth check with improved error handling and retry logic
+        // ✅ ENHANCED: Better auth check with comprehensive error handling
         async performAuthCheck(force = false) {
             if (AppState.authCheckInProgress && !force) {
-                console.log('Auth check already in progress, skipping...');
+                console.log('🔄 Auth check already in progress, skipping...');
                 return;
             }
 
-            // Check if we're offline
-            if (!navigator.onLine) {
-                console.log('Offline, skipping auth check');
+            // Skip if offline
+            if (!ConnectionManager.isConnected()) {
+                console.log('🌐 Offline, skipping auth check');
                 return;
             }
 
             AppState.authCheckInProgress = true;
             AppState.sessionMetrics.authChecks++;
-            
+            AppState.sessionMetrics.lastAuthCheck = Date.now();
+
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased timeout
+                console.log('🔍 Performing auth check...');
 
-                // ✅ CRITICAL: Include credentials and comprehensive headers for session cookies
-                const response = await fetch('/auth/auth-status', {
-                    method: 'GET',
-                    credentials: 'same-origin',  // Essential for session cookies
-                    cache: 'no-cache',           // Don't cache auth responses
-                    signal: controller.signal,
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
+                const response = await Utils.retryFunction(async () => {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+                    try {
+                        const response = await fetch('/auth/auth-status', {
+                            method: 'GET',
+                            credentials: 'same-origin', // Essential for session cookies
+                            cache: 'no-cache',
+                            signal: controller.signal,
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest'
+                            }
+                        });
+                        
+                        clearTimeout(timeoutId);
+                        return response;
+                    } catch (error) {
+                        clearTimeout(timeoutId);
+                        throw error;
                     }
-                });
-
-                clearTimeout(timeoutId);
-                AppState.lastAuthCheck = Date.now();
+                }, 3, 2000);
 
                 if (!response.ok) {
+                    console.warn('❌ Auth check failed:', response.status);
                     AppState.sessionMetrics.authFailures++;
-                    console.warn('Auth check failed:', response.status);
                     
                     if (response.status === 401) {
                         // Session expired or invalid
                         if (AppState.serverUser?.is_authenticated) {
+                            console.log('⚠️ Session expired, logging out...');
                             AppState.serverUser = { is_authenticated: false };
                             this.checkAuthentication();
                             Utils.showToast('Session expired. Please log in again.', 'warning');
                         }
-                    } else if (response.status >= 500) {
-                        // Server error - don't invalidate session, just log
-                        console.warn('Server error during auth check, maintaining current state');
+                    } else if (response.status === 503) {
+                        Utils.showToast('Service temporarily unavailable', 'warning');
                     }
                     return;
                 }
 
                 const data = await response.json();
+                console.log('📊 Auth check response:', {
+                    authenticated: data.is_authenticated,
+                    email: data.email,
+                    timestamp: new Date().toISOString()
+                });
+
                 const wasAuthenticated = AppState.serverUser?.is_authenticated;
                 const nowAuthenticated = data.is_authenticated;
 
-                console.log('Auth check result:', { 
-                    wasAuthenticated, 
-                    nowAuthenticated, 
-                    email: data.email,
-                    userId: data.user_id 
-                });
-
                 // Handle authentication state changes
                 if (wasAuthenticated !== nowAuthenticated) {
-                    console.log('Authentication status changed:', { was: wasAuthenticated, now: nowAuthenticated });
-                    
+                    console.log('🔄 Authentication status changed:', {
+                        was: wasAuthenticated,
+                        now: nowAuthenticated
+                    });
+
                     if (!nowAuthenticated) {
-                        console.log('User logged out, updating state...');
+                        console.log('👋 User logged out, updating state...');
                         AppState.serverUser = { is_authenticated: false };
                         this.checkAuthentication();
                         Utils.showToast('You have been logged out', 'warning');
                     } else {
-                        console.log('User logged in, updating state...');
+                        console.log('👋 User logged in, updating state...');
                         AppState.serverUser = {
                             is_authenticated: true,
                             id: data.user_id,
@@ -580,9 +616,9 @@
                 }
 
                 // Handle user ID changes (different user logged in)
-                if (nowAuthenticated && AppState.serverUser?.id && data.user_id &&
+                if (nowAuthenticated && AppState.serverUser?.id && data.user_id && 
                     AppState.serverUser.id !== data.user_id) {
-                    console.log('Different user logged in, updating state...');
+                    console.log('🔄 Different user logged in, updating state...');
                     AppState.serverUser = {
                         is_authenticated: true,
                         id: data.user_id,
@@ -592,38 +628,33 @@
                     };
                     this.updateUserProfile(AppState.serverUser);
                     StorageManager.set(StorageManager.keys.USER_DATA, AppState.serverUser);
-                    StorageManager.backupSession();
                 }
 
-                // ✅ IMPORTANT: Update stored user data if authenticated
+                // Update stored user data if authenticated
                 if (nowAuthenticated && data.email) {
-                    const userData = {
+                    StorageManager.set(StorageManager.keys.USER_DATA, {
                         is_authenticated: true,
                         id: data.user_id,
                         name: data.name,
                         email: data.email,
                         picture: data.picture
-                    };
-                    StorageManager.set(StorageManager.keys.USER_DATA, userData);
-                    StorageManager.backupSession();
+                    });
                 }
+
+                // Reset failure count on success
+                AppState.sessionMetrics.authFailures = 0;
 
             } catch (error) {
                 AppState.sessionMetrics.authFailures++;
                 
                 if (error.name === 'AbortError') {
-                    console.warn('Auth check timed out');
-                    Utils.showToast('Connection timeout, retrying...', 'warning', 2000);
+                    console.warn('⏰ Auth check timed out');
                 } else {
-                    Utils.logError('Auth Check Failed', error, {
-                        wasAuthenticated: AppState.serverUser?.is_authenticated,
-                        connectionStatus: AppState.connectionStatus,
-                        authChecks: AppState.sessionMetrics.authChecks
-                    });
+                    console.error('❌ Auth check failed:', error);
                     
-                    // Only show error if we're online and this wasn't a network issue
-                    if (navigator.onLine && !error.message.includes('fetch')) {
-                        Utils.showToast('Authentication check failed', 'error', 2000);
+                    // Show error only if multiple consecutive failures
+                    if (AppState.sessionMetrics.authFailures >= 3) {
+                        Utils.showToast('Authentication check failed', 'error');
                     }
                 }
             } finally {
@@ -631,18 +662,10 @@
             }
         },
 
-        // ✅ ENHANCED: Logout with improved error handling
         async logout() {
+            console.log('🚪 Initiating logout...');
+            
             try {
-                const wasAuthenticated = AppState.serverUser?.is_authenticated;
-                const userEmail = AppState.serverUser?.email;
-                
-                // Clear state immediately for better UX
-                AppState.serverUser = { is_authenticated: false };
-                this.checkAuthentication();
-                StorageManager.clear();
-                
-                // Attempt server-side logout
                 const response = await fetch('/auth/logout', {
                     method: 'POST',
                     credentials: 'same-origin',
@@ -652,21 +675,21 @@
                 });
 
                 if (response.ok) {
-                    console.log(`✅ Logout successful for user: ${userEmail}`);
+                    AppState.serverUser = { is_authenticated: false };
+                    this.checkAuthentication();
+                    StorageManager.clear();
                     Utils.showToast('Logged out successfully', 'info');
                 } else {
-                    console.warn('Server logout failed, but local state cleared');
-                    Utils.showToast('Logged out (local)', 'info');
+                    throw new Error('Logout failed');
                 }
             } catch (error) {
-                console.error('Logout error:', error);
-                // Even if server logout fails, we've cleared local state
-                Utils.showToast('Logged out (connection error)', 'warning');
+                console.error('❌ Logout error:', error);
+                Utils.showToast('Logout failed', 'error');
             }
         },
 
         handleAuthChange() {
-            console.log('Auth change detected across tabs');
+            console.log('🔄 Auth change detected across tabs');
             this.loadStoredUser();
             this.checkAuthentication();
         },
@@ -683,103 +706,77 @@
                     credentials: 'same-origin',
                     cache: 'no-cache'
                 });
-                
+
                 if (response.ok) {
-                    const serverData = await response.json();
-                    const debugInfo = {
-                        serverData,
-                        clientState: {
-                            serverUser: AppState.serverUser,
-                            isAuthenticated: this.isAuthenticated(),
-                            connectionStatus: AppState.connectionStatus,
-                            sessionMetrics: AppState.sessionMetrics,
-                            lastAuthCheck: new Date(AppState.lastAuthCheck).toISOString(),
-                            authCheckInProgress: AppState.authCheckInProgress
-                        },
-                        localStorage: {
-                            userData: StorageManager.get(StorageManager.keys.USER_DATA),
-                            sessionBackup: StorageManager.get(StorageManager.keys.SESSION_BACKUP)
-                        },
-                        browser: {
-                            onLine: navigator.onLine,
-                            cookieEnabled: navigator.cookieEnabled,
-                            userAgent: navigator.userAgent.substring(0, 100) + '...',
-                            timestamp: new Date().toISOString()
-                        }
-                    };
-                    
-                    console.log('🔍 Comprehensive Session Debug:', debugInfo);
-                    return debugInfo;
+                    const data = await response.json();
+                    console.log('🔍 Session Debug:', data);
+                    console.log('📊 App State:', {
+                        serverUser: AppState.serverUser,
+                        metrics: AppState.sessionMetrics,
+                        isOnline: AppState.isOnline,
+                        isTabVisible: AppState.isTabVisible
+                    });
+                    return data;
                 } else {
-                    console.error('Session debug failed:', response.status);
+                    console.error('❌ Session debug failed:', response.status);
                 }
             } catch (error) {
-                Utils.logError('Session Debug', error);
+                console.error('❌ Session debug error:', error);
             }
         },
 
-        // ✅ NEW: Session recovery mechanism
-        async attemptSessionRecovery() {
-            console.log('🔄 Attempting session recovery...');
+        // NEW: Manual session recovery
+        async recoverSession() {
+            console.log('🔧 Attempting session recovery...');
+            AppState.sessionMetrics.recoveryAttempts++;
             
             try {
                 // Try to restore from backup
-                if (StorageManager.restoreSession()) {
-                    // Validate the restored session
-                    const isValid = await this.validateRestoredSession();
-                    if (isValid) {
-                        console.log('✅ Session recovered successfully');
-                        this.checkAuthentication();
-                        Utils.showToast('Session recovered', 'success');
-                        return true;
-                    }
+                if (StorageManager.restoreState()) {
+                    Utils.showToast('Session restored from backup', 'success');
                 }
-                
-                console.log('❌ Session recovery failed');
-                return false;
-            } catch (error) {
-                Utils.logError('Session Recovery', error);
-                return false;
-            }
-        },
 
-        async validateRestoredSession() {
-            try {
-                const response = await fetch('/auth/auth-status', {
-                    method: 'GET',
-                    credentials: 'same-origin',
-                    cache: 'no-cache'
-                });
+                // Force auth check
+                await this.performAuthCheck(true);
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    return data.is_authenticated && data.email === AppState.serverUser?.email;
+                // If still not authenticated, clear everything and restart
+                if (!this.isAuthenticated()) {
+                    console.log('🔄 Full reset required');
+                    StorageManager.clear();
+                    AppState.serverUser = { is_authenticated: false };
+                    this.checkAuthentication();
+                    Utils.showToast('Session reset complete', 'info');
                 }
-                return false;
             } catch (error) {
-                console.warn('Session validation failed:', error);
-                return false;
+                console.error('❌ Session recovery failed:', error);
+                Utils.showToast('Session recovery failed', 'error');
             }
-        },
-
-        // ✅ NEW: Get session metrics for debugging
-        getSessionMetrics() {
-            return {
-                ...AppState.sessionMetrics,
-                uptime: Date.now() - (window.performance?.timing?.loadEventEnd || 0),
-                lastAuthCheck: new Date(AppState.lastAuthCheck).toISOString(),
-                connectionStatus: AppState.connectionStatus
-            };
         }
     };
 
-    // ===== THEME MANAGER =====
+    // ===== ENHANCED THEME MANAGER =====
     const ThemeManager = {
         init() {
-            const savedTheme = StorageManager.get(StorageManager.keys.THEME, 'light');
+            console.log('🎨 Initializing theme system...');
+            
+            // Check system theme preference
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            const savedTheme = StorageManager.get(StorageManager.keys.THEME, systemTheme);
+            
             this.applyTheme(savedTheme);
             this.setupThemeToggle();
-            this.setupSystemThemeDetection();
+            this.setupSystemThemeListener();
+        },
+
+        setupSystemThemeListener() {
+            // Listen for system theme changes
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                const currentTheme = this.getCurrentTheme();
+                if (!StorageManager.get(StorageManager.keys.THEME)) {
+                    // Only auto-change if user hasn't manually set a theme
+                    this.applyTheme(e.matches ? 'dark' : 'light');
+                }
+            });
         },
 
         setupThemeToggle() {
@@ -791,29 +788,15 @@
             }
         },
 
-        // ✅ NEW: System theme detection
-        setupSystemThemeDetection() {
-            if (window.matchMedia) {
-                const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-                darkModeQuery.addEventListener('change', (e) => {
-                    const storedTheme = StorageManager.get(StorageManager.keys.THEME);
-                    // Only auto-switch if user hasn't manually set a theme
-                    if (!storedTheme) {
-                        this.applyTheme(e.matches ? 'dark' : 'light');
-                    }
-                });
-            }
-        },
-
         toggleTheme() {
-            const currentTheme = document.body.getAttribute('data-theme') || 'light';
+            const currentTheme = this.getCurrentTheme();
             const newTheme = currentTheme === 'light' ? 'dark' : 'light';
             this.applyTheme(newTheme);
         },
 
         applyTheme(theme) {
+            console.log('🎨 Applying theme:', theme);
             document.body.setAttribute('data-theme', theme);
-            document.body.setAttribute('data-color-scheme', theme);
             StorageManager.set(StorageManager.keys.THEME, theme);
 
             const themeToggle = $('themeToggle');
@@ -834,18 +817,6 @@
             if (themeColorMeta) {
                 themeColorMeta.content = theme === 'dark' ? '#111827' : '#1B7EFE';
             }
-
-            // Update CSS custom properties if needed
-            this.updateThemeProperties(theme);
-        },
-
-        updateThemeProperties(theme) {
-            const root = document.documentElement;
-            if (theme === 'dark') {
-                root.style.setProperty('--surface-elevated', 'rgba(255, 255, 255, 0.05)');
-            } else {
-                root.style.setProperty('--surface-elevated', 'rgba(255, 255, 255, 0.8)');
-            }
         },
 
         getCurrentTheme() {
@@ -853,13 +824,17 @@
         }
     };
 
-    // ===== ENHANCED SIDEBAR MANAGER =====
+    // ===== ENHANCED SIDEBAR MANAGER WITH TOUCH SUPPORT =====
     const SidebarManager = {
+        touchStartX: 0,
+        touchStartY: 0,
+        
         init() {
+            console.log('📱 Initializing sidebar system...');
             this.setupMobileMenuToggle();
             this.setupSidebarInteractions();
             this.setupNewThreadButton();
-            this.setupSessionInfo();
+            this.setupTouchGestures();
         },
 
         setupMobileMenuToggle() {
@@ -875,54 +850,12 @@
                 overlay.addEventListener('click', () => {
                     this.closeSidebar();
                 });
-
-                // Swipe gestures for mobile
-                this.setupSwipeGestures(sidebar);
             }
-        },
-
-        // ✅ NEW: Swipe gestures for mobile sidebar
-        setupSwipeGestures(sidebar) {
-            let startX = 0;
-            let currentX = 0;
-
-            const handleTouchStart = (e) => {
-                startX = e.touches[0].clientX;
-            };
-
-            const handleTouchMove = (e) => {
-                currentX = e.touches[0].clientX;
-            };
-
-            const handleTouchEnd = () => {
-                const diffX = startX - currentX;
-                if (diffX > 50 && sidebar.classList.contains('open')) {
-                    this.closeSidebar();
-                } else if (diffX < -50 && !sidebar.classList.contains('open') && startX < 50) {
-                    this.openSidebar();
-                }
-            };
-
-            document.addEventListener('touchstart', handleTouchStart, { passive: true });
-            document.addEventListener('touchmove', handleTouchMove, { passive: true });
-            document.addEventListener('touchend', handleTouchEnd, { passive: true });
         },
 
         setupSidebarInteractions() {
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
-                    this.closeSidebar();
-                }
-            });
-
-            // Click outside to close on desktop
-            document.addEventListener('click', (e) => {
-                const sidebar = $('sidebar');
-                const mobileMenuBtn = $('mobileMenuBtn');
-                
-                if (sidebar && sidebar.classList.contains('open') && 
-                    !sidebar.contains(e.target) && 
-                    e.target !== mobileMenuBtn) {
                     this.closeSidebar();
                 }
             });
@@ -937,32 +870,40 @@
             }
         },
 
-        // ✅ NEW: Session information display
-        setupSessionInfo() {
-            const sessionInfo = $('sessionInfo');
-            if (sessionInfo) {
-                sessionInfo.addEventListener('click', () => {
-                    this.showSessionDetails();
-                });
-            }
-        },
+        // NEW: Touch gesture support for mobile
+        setupTouchGestures() {
+            if (!('ontouchstart' in window)) return;
 
-        showSessionDetails() {
-            const metrics = AuthManager.getSessionMetrics();
-            const details = `Session Details:
-• Auth Checks: ${metrics.authChecks}
-• Failures: ${metrics.authFailures}
-• Connection: ${AppState.connectionStatus}
-• Last Check: ${new Date(AppState.lastAuthCheck).toLocaleTimeString()}`;
-            
-            alert(details);
+            document.addEventListener('touchstart', (e) => {
+                this.touchStartX = e.touches[0].clientX;
+                this.touchStartY = e.touches[0].clientY;
+            }, { passive: true });
+
+            document.addEventListener('touchmove', (e) => {
+                const touchX = e.touches[0].clientX;
+                const touchY = e.touches[0].clientY;
+                const diffX = touchX - this.touchStartX;
+                const diffY = touchY - this.touchStartY;
+
+                // Swipe right from left edge to open sidebar
+                if (this.touchStartX < 20 && diffX > 50 && Math.abs(diffY) < 100) {
+                    this.openSidebar();
+                }
+                
+                // Swipe left to close sidebar
+                if (diffX < -50 && Math.abs(diffY) < 100) {
+                    const sidebar = $('sidebar');
+                    if (sidebar && sidebar.classList.contains('open')) {
+                        this.closeSidebar();
+                    }
+                }
+            }, { passive: true });
         },
 
         toggleSidebar() {
             const sidebar = $('sidebar');
-            const overlay = $('sidebarOverlay');
             const isOpen = sidebar?.classList.contains('open');
-
+            
             if (isOpen) {
                 this.closeSidebar();
             } else {
@@ -978,7 +919,6 @@
             overlay?.classList.add('active');
             document.body.classList.add('sidebar-open');
 
-            // Focus management
             setTimeout(() => {
                 const firstFocusable = sidebar?.querySelector('button, [tabindex]:not([tabindex="-1"])');
                 if (firstFocusable) {
@@ -997,16 +937,10 @@
         },
 
         startNewThread() {
-            // Confirm if there's existing content
-            const chatContent = $('chatContent');
-            if (chatContent && chatContent.children.length > 0) {
-                if (!confirm('Start a new conversation? Current chat will be cleared.')) {
-                    return;
-                }
-            }
-
+            console.log('🆕 Starting new thread...');
             AppState.currentThreadId = Utils.generateThreadId();
-
+            
+            const chatContent = $('chatContent');
             if (chatContent) {
                 chatContent.innerHTML = '';
             }
@@ -1026,18 +960,15 @@
 
             this.closeSidebar();
             Utils.showToast('Started new conversation', 'success');
-
-            // Update session backup
-            StorageManager.backupSession();
         }
     };
 
     // ===== ENHANCED SAVED MESSAGES MANAGER =====
     const SavedMessagesManager = {
         init() {
+            console.log('💾 Initializing saved messages system...');
             this.loadSavedMessages();
             this.setupClearButton();
-            this.setupExportButton();
         },
 
         loadSavedMessages() {
@@ -1052,8 +983,7 @@
                 title: title || content.substring(0, 50) + '...',
                 content: content,
                 timestamp: Date.now(),
-                threadId: AppState.currentThreadId,
-                userEmail: AppState.serverUser?.email
+                threadId: AppState.currentThreadId
             };
 
             AppState.savedMessages.set(messageId, message);
@@ -1098,30 +1028,27 @@
             if (messages.length === 0) {
                 savedList.innerHTML = `
                     <div class="empty-saved">
-                        <div class="empty-saved-icon">📝</div>
+                        <div class="empty-saved-icon">💾</div>
                         <p>No saved messages yet</p>
                         <p>Save important conversations for later</p>
                     </div>
                 `;
-                
                 if (clearBtn) clearBtn.style.display = 'none';
                 return;
             }
-
-            if (clearBtn) clearBtn.style.display = 'block';
 
             savedList.innerHTML = messages.map(msg => `
                 <div class="saved-item" onclick="loadSavedMessage('${msg.id}')">
                     <div class="saved-item-content">
                         <div class="saved-item-title">${Utils.escapeHtml(msg.title)}</div>
-                        <div class="saved-item-preview">${Utils.escapeHtml(msg.content.substring(0, 100))}...</div>
-                        <div class="saved-item-meta">${new Date(msg.timestamp).toLocaleDateString()}</div>
+                        <div class="saved-item-preview">${Utils.escapeHtml(msg.content.substring(0, 80))}...</div>
                     </div>
-                    <button class="saved-item-delete" onclick="event.stopPropagation(); removeSavedMessage('${msg.id}')" title="Delete">
-                        ×
-                    </button>
+                    <button class="saved-item-delete" onclick="event.stopPropagation(); removeSavedMessage('${msg.id}')" 
+                            title="Delete saved message">×</button>
                 </div>
             `).join('');
+
+            if (clearBtn) clearBtn.style.display = 'block';
         },
 
         setupClearButton() {
@@ -1133,261 +1060,140 @@
             }
         },
 
-        // ✅ NEW: Export saved messages
-        setupExportButton() {
-            const exportBtn = $('exportSavedBtn');
-            if (exportBtn) {
-                exportBtn.addEventListener('click', () => {
-                    this.exportSavedMessages();
-                });
-            }
-        },
-
+        // NEW: Export saved messages
         exportSavedMessages() {
             const messages = Array.from(AppState.savedMessages.values());
-            if (messages.length === 0) {
-                Utils.showToast('No messages to export', 'info');
-                return;
-            }
-
-            const exportData = {
-                exportDate: new Date().toISOString(),
-                userEmail: AppState.serverUser?.email,
-                messagesCount: messages.length,
-                messages: messages.map(msg => ({
-                    title: msg.title,
-                    content: msg.content,
-                    timestamp: new Date(msg.timestamp).toISOString()
-                }))
+            const data = {
+                export_date: new Date().toISOString(),
+                total_messages: messages.length,
+                messages: messages
             };
 
-            const dataStr = JSON.stringify(exportData, null, 2);
-            const dataBlob = new Blob([dataStr], { type: 'application/json' });
-            const url = URL.createObjectURL(dataBlob);
-            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `dsa-saved-messages-${new Date().toISOString().split('T')[0]}.json`;
+            a.download = `dsa_saved_messages_${new Date().toISOString().split('T')[0]}.json`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-
-            Utils.showToast('Messages exported successfully', 'success');
-        }
-    };
-
-    // ===== CONNECTION MONITOR =====
-    const ConnectionMonitor = {
-        init() {
-            this.setupNetworkListeners();
-            this.startConnectionCheck();
-        },
-
-        setupNetworkListeners() {
-            window.addEventListener('online', () => {
-                AppState.connectionStatus = 'online';
-                this.handleConnectionRestore();
-            });
-
-            window.addEventListener('offline', () => {
-                AppState.connectionStatus = 'offline';
-                this.handleConnectionLoss();
-            });
-        },
-
-        handleConnectionRestore() {
-            console.log('🌐 Connection restored');
-            Utils.showToast('Connection restored', 'success', 2000);
             
-            // Restart auth checks if user is authenticated
-            if (AppState.serverUser?.is_authenticated) {
-                AuthManager.startPeriodicAuthCheck();
-                AuthManager.performAuthCheck(true);
-            }
-        },
-
-        handleConnectionLoss() {
-            console.log('📡 Connection lost');
-            Utils.showToast('Connection lost. Some features may be limited.', 'warning', 5000);
-            AuthManager.stopPeriodicAuthCheck();
-        },
-
-        startConnectionCheck() {
-            // Periodic connection validation
-            setInterval(() => {
-                const wasOnline = AppState.connectionStatus === 'online';
-                const isOnline = navigator.onLine;
-                
-                if (wasOnline !== isOnline) {
-                    AppState.connectionStatus = isOnline ? 'online' : 'offline';
-                    if (isOnline) {
-                        this.handleConnectionRestore();
-                    } else {
-                        this.handleConnectionLoss();
-                    }
-                }
-            }, 30000); // Check every 30 seconds
+            Utils.showToast('Saved messages exported', 'success');
         }
     };
 
-    // ===== INITIALIZATION =====
-    function initializeApp() {
-        try {
-            console.log('🚀 Initializing DSA Mentor Enhanced Authentication System...');
-
-            // Initialize core managers
-            AuthManager.init();
-            ThemeManager.init();
-            SidebarManager.init();
-            SavedMessagesManager.init();
-            ConnectionMonitor.init();
-
-            // Mark as initialized
-            AppState.isInitialized = true;
-
-            // Make app state globally available with enhanced API
-            window.app = {
-                state: AppState,
-                util: Utils,
-                auth: AuthManager,
-                theme: ThemeManager,
-                sidebar: SidebarManager,
-                saved: SavedMessagesManager,
-                storage: StorageManager,
-                connection: ConnectionMonitor,
-                
-                // ✅ NEW: Helper methods
-                helpers: {
-                    getSessionMetrics: () => AuthManager.getSessionMetrics(),
-                    attemptSessionRecovery: () => AuthManager.attemptSessionRecovery(),
-                    exportSessionData: () => {
-                        const data = {
-                            user: AppState.serverUser,
-                            metrics: AuthManager.getSessionMetrics(),
-                            savedMessages: Array.from(AppState.savedMessages.values()),
-                            theme: ThemeManager.getCurrentTheme(),
-                            timestamp: new Date().toISOString()
-                        };
-                        console.log('Session Data Export:', data);
-                        return data;
-                    }
-                }
-            };
-
-            console.log('✅ DSA Mentor Enhanced Authentication System initialized successfully');
-            
-            // Show initialization complete message
-            setTimeout(() => {
-                if (AppState.serverUser?.is_authenticated) {
-                    Utils.showToast(`Welcome back, ${AppState.serverUser.name}!`, 'success');
-                } else {
-                    Utils.showToast('DSA Mentor ready! Sign in to get started.', 'info');
-                }
-            }, 500);
-
-        } catch (error) {
-            Utils.logError('App Initialization', error);
-            Utils.showToast('Initialization failed. Please refresh the page.', 'error');
-        }
-    }
-
-    // ===== ENHANCED INITIALIZATION WITH RETRY =====
-    async function initializeWithRetry() {
-        const maxRetries = 3;
-        let attempt = 1;
-
-        while (attempt <= maxRetries) {
-            try {
-                initializeApp();
-                break;
-            } catch (error) {
-                console.error(`Initialization attempt ${attempt} failed:`, error);
-                
-                if (attempt === maxRetries) {
-                    Utils.showToast('Failed to initialize. Please refresh the page.', 'error');
-                    throw error;
-                }
-                
-                console.log(`Retrying initialization in ${attempt * 1000}ms...`);
-                await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-                attempt++;
-            }
-        }
-    }
-
-    // Auto-initialize when DOM is ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initializeWithRetry);
-    } else {
-        initializeWithRetry();
-    }
-
-    // Global functions for backward compatibility
-    window.removeSavedMessage = (messageId) => SavedMessagesManager.removeSavedMessage(messageId);
-    
-    window.loadSavedMessage = (messageId) => {
-        const message = AppState.savedMessages.get(messageId);
-        if (message) {
-            Utils.showToast('Loading saved message...', 'info');
-            // Add the saved message to current chat
-            if (window.addMessageToChat) {
-                window.addMessageToChat('assistant', message.content);
-            }
-        }
+    // ===== GLOBAL APP OBJECT =====
+    window.app = {
+        state: AppState,
+        auth: AuthManager,
+        theme: ThemeManager,
+        sidebar: SidebarManager,
+        savedMessages: SavedMessagesManager,
+        storage: StorageManager,
+        connection: ConnectionManager,
+        util: Utils
     };
 
-    // ✅ ENHANCED: Global debug functions
-    window.debugAuth = async function() {
-        if (window.app && window.app.auth) {
-            return await window.app.auth.debugSession();
-        } else {
-            console.error('Auth system not loaded');
-            return null;
-        }
+    // ===== GLOBAL DEBUG FUNCTIONS =====
+    window.debugAuth = function() {
+        console.group('🔍 Authentication Debug');
+        console.log('App State:', AppState);
+        console.log('Server User:', AppState.serverUser);
+        console.log('Session Metrics:', AppState.sessionMetrics);
+        console.log('Is Authenticated:', AuthManager.isAuthenticated());
+        console.log('Connection Status:', ConnectionManager.isConnected());
+        console.groupEnd();
+        
+        return AuthManager.debugSession();
     };
 
     window.debugApp = function() {
-        if (window.app) {
-            return window.app.helpers.exportSessionData();
-        } else {
-            console.error('App not loaded');
-            return null;
+        return {
+            appState: AppState,
+            localStorage: {
+                userData: StorageManager.get(StorageManager.keys.USER_DATA),
+                theme: StorageManager.get(StorageManager.keys.THEME),
+                savedMessages: StorageManager.get(StorageManager.keys.SAVED_MESSAGES),
+                sessionBackup: StorageManager.get(StorageManager.keys.SESSION_BACKUP)
+            },
+            browserInfo: {
+                userAgent: navigator.userAgent,
+                cookieEnabled: navigator.cookieEnabled,
+                onLine: navigator.onLine,
+                language: navigator.language
+            }
+        };
+    };
+
+    window.recoverSession = function() {
+        return AuthManager.recoverSession();
+    };
+
+    window.checkAuth = function() {
+        return AuthManager.performAuthCheck(true);
+    };
+
+    // ===== INITIALIZATION SEQUENCE =====
+    function initializeApp() {
+        try {
+            console.log('🚀 Starting DSA Mentor initialization...');
+
+            // Initialize connection monitoring first
+            ConnectionManager.init();
+            
+            // Initialize theme system
+            ThemeManager.init();
+            
+            // Initialize authentication system
+            AuthManager.init();
+            
+            // Initialize sidebar system
+            SidebarManager.init();
+            
+            // Initialize saved messages
+            SavedMessagesManager.init();
+
+            // Mark app as initialized
+            AppState.isInitialized = true;
+
+            console.log('✅ DSA Mentor authentication system fully initialized');
+            Utils.showToast('App ready!', 'success', 2000);
+
+        } catch (error) {
+            console.error('❌ Initialization failed:', error);
+            Utils.showToast('Initialization failed. Please refresh.', 'error', 5000);
+        }
+    }
+
+    // ===== GLOBAL FUNCTIONS FOR SAVED MESSAGES =====
+    window.loadSavedMessage = function(messageId) {
+        const message = AppState.savedMessages.get(messageId);
+        if (message) {
+            const chatInput = $('chatInput');
+            if (chatInput) {
+                chatInput.value = message.content;
+                chatInput.focus();
+                Utils.showToast('Message loaded', 'info');
+            }
         }
     };
 
-    // ✅ NEW: Global session recovery function
-    window.recoverSession = async function() {
-        if (window.app && window.app.auth) {
-            return await window.app.auth.attemptSessionRecovery();
-        } else {
-            console.error('Auth system not loaded');
-            return false;
-        }
+    window.removeSavedMessage = function(messageId) {
+        SavedMessagesManager.removeSavedMessage(messageId);
     };
 
-    // ✅ NEW: Manual auth check function
-    window.checkAuth = async function() {
-        if (window.app && window.app.auth) {
-            return await window.app.auth.performAuthCheck(true);
-        } else {
-            console.error('Auth system not loaded');
-        }
+    window.exportSavedMessages = function() {
+        SavedMessagesManager.exportSavedMessages();
     };
 
-    // ✅ NEW: Error boundary for unhandled errors
-    window.addEventListener('error', (event) => {
-        Utils.logError('Global Error', event.error, {
-            filename: event.filename,
-            lineno: event.lineno,
-            colno: event.colno
-        });
-    });
+    // ===== START INITIALIZATION =====
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    } else {
+        // DOM is already ready
+        setTimeout(initializeApp, 100);
+    }
 
-    window.addEventListener('unhandledrejection', (event) => {
-        Utils.logError('Unhandled Promise Rejection', event.reason);
-    });
-
-    console.log('🎯 DSA Mentor Enhanced Authentication System loaded');
-
+    console.log('🎯 DSA Mentor authentication system loaded');
 })();
