@@ -94,7 +94,261 @@
       }
     }
   };
+  // ===== CORE CHAT FUNCTIONALITY =====
+(() => {
+    'use strict';
+    
+    // Wait for app modules to be ready
+    function waitForApp() {
+        return new Promise((resolve) => {
+            const checkApp = () => {
+                if (window.app && window.app.state && window.app.auth) {
+                    resolve();
+                } else {
+                    setTimeout(checkApp, 100);
+                }
+            };
+            checkApp();
+        });
+    }
+    
+    // Main send message function
+    window.sendMessage = async function() {
+        try {
+            await waitForApp();
+            
+            const chatInput = document.getElementById('chatInput');
+            const sendButton = document.getElementById('sendButton');
+            
+            if (!chatInput || !sendButton) {
+                console.error('Chat elements not found');
+                return;
+            }
+            
+            const message = chatInput.value.trim();
+            if (!message) {
+                console.warn('Empty message, not sending');
+                return;
+            }
+            
+            // Check authentication
+            if (!window.app.auth.isAuthenticated()) {
+                console.log('User not authenticated, showing auth overlay');
+                window.app.auth.showAuthOverlay();
+                return;
+            }
+            
+            console.log('Sending message:', message);
+            
+            // Disable input while sending
+            sendButton.disabled = true;
+            chatInput.disabled = true;
+            sendButton.textContent = 'Sending...';
+            
+            // Add user message to chat
+            addMessageToChat('user', message);
+            chatInput.value = '';
+            
+            // Show typing indicator
+            const typingId = addTypingIndicator();
+            
+            try {
+                // Send to backend
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ query: message })
+                });
+                
+                // Remove typing indicator
+                removeTypingIndicator(typingId);
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // Authentication required
+                        window.app.auth.showAuthOverlay();
+                        addMessageToChat('assistant', 'Please sign in to continue our conversation.');
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Received response:', data);
+                
+                // Add bot response
+                const botMessage = data.response || data.best_book?.content || 'Sorry, I could not process your request.';
+                addMessageToChat('assistant', botMessage);
+                
+                // Add additional content if available
+                if (data.best_book && data.best_book.content && data.best_book.content !== botMessage) {
+                    addMessageToChat('assistant', data.best_book.content);
+                }
+                
+            } catch (error) {
+                console.error('Send message error:', error);
+                removeTypingIndicator(typingId);
+                
+                let errorMessage = 'Sorry, there was an error processing your request. Please try again.';
+                if (error.message.includes('401')) {
+                    errorMessage = 'Please sign in to continue our conversation.';
+                    window.app.auth.showAuthOverlay();
+                } else if (error.message.includes('fetch')) {
+                    errorMessage = 'Network error. Please check your connection and try again.';
+                }
+                
+                addMessageToChat('assistant', errorMessage);
+                
+                if (window.app && window.app.util && window.app.util.showToast) {
+                    window.app.util.showToast('Failed to send message', 'error');
+                }
+            }
+            
+        } catch (error) {
+            console.error('Critical send message error:', error);
+            if (window.showToast) {
+                window.showToast('An unexpected error occurred', 'error');
+            }
+        } finally {
+            // Re-enable input
+            const chatInput = document.getElementById('chatInput');
+            const sendButton = document.getElementById('sendButton');
+            
+            if (sendButton) {
+                sendButton.disabled = false;
+                sendButton.textContent = 'Send';
+            }
+            if (chatInput) {
+                chatInput.disabled = false;
+                chatInput.focus();
+            }
+        }
+    };
+    
+    // Helper function to add messages to chat
+    function addMessageToChat(sender, content) {
+        const chatContent = document.getElementById('chatContent');
+        const welcomeScreen = document.getElementById('welcomeScreen');
+        
+        // Hide welcome screen on first message
+        if (welcomeScreen && sender === 'user') {
+            welcomeScreen.style.display = 'none';
+        }
+        
+        if (!chatContent) {
+            console.error('Chat content element not found');
+            return;
+        }
+        
+        const messageId = `message_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const messageDiv = document.createElement('div');
+        messageDiv.id = messageId;
+        messageDiv.className = `message ${sender}-message`;
+        
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <div class="message-text">${escapeHtml(content)}</div>
+                <div class="message-actions">
+                    <button class="action-btn copy-btn" onclick="copyMessage('${messageId}')" title="Copy message">
+                        📋
+                    </button>
+                    ${sender === 'assistant' ? `<button class="action-btn save-btn" onclick="saveMessage('${messageId}')" title="Save message">💾</button>` : ''}
+                </div>
+            </div>
+        `;
+        
+        chatContent.appendChild(messageDiv);
+        
+        // Smooth scroll to new message
+        setTimeout(() => {
+            messageDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+        
+        return messageId;
+    }
+    
+    // Helper function to add typing indicator
+    function addTypingIndicator() {
+        const typingId = `typing_${Date.now()}`;
+        const chatContent = document.getElementById('chatContent');
+        
+        if (!chatContent) return null;
+        
+        const typingDiv = document.createElement('div');
+        typingDiv.id = typingId;
+        typingDiv.className = 'message assistant-message typing-message';
+        typingDiv.innerHTML = `
+            <div class="message-content">
+                <div class="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        `;
+        
+        chatContent.appendChild(typingDiv);
+        
+        setTimeout(() => {
+            typingDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+        
+        return typingId;
+    }
+    
+    // Helper function to remove typing indicator
+    function removeTypingIndicator(typingId) {
+        if (typingId) {
+            const typingElement = document.getElementById(typingId);
+            if (typingElement) {
+                typingElement.remove();
+            }
+        }
+    }
+    
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Global helper functions
+    window.copyMessage = function(messageId) {
+        const messageElement = document.getElementById(messageId);
+        if (messageElement) {
+            const textElement = messageElement.querySelector('.message-text');
+            if (textElement) {
+                navigator.clipboard.writeText(textElement.textContent).then(() => {
+                    if (window.showToast) {
+                        window.showToast('Message copied!', 'success');
+                    }
+                }).catch(err => {
+                    console.error('Copy failed:', err);
+                });
+            }
+        }
+    };
+    
+    window.saveMessage = function(messageId) {
+        const messageElement = document.getElementById(messageId);
+        if (messageElement && window.app && window.app.saved) {
+            const textElement = messageElement.querySelector('.message-text');
+            if (textElement) {
+                const content = textElement.textContent;
+                const title = content.substring(0, 50) + (content.length > 50 ? '...' : '');
+                window.app.saved.saveMessage(messageId, content, title);
+            }
+        }
+    };
+    
+    console.log('✅ Chat core functionality loaded');
+})();
 
+ 
   // ===== STREAMING RESPONSE WRITER =====
   const StreamingWriter = {
     activeAnimations: new Set(),
