@@ -43,11 +43,19 @@ def validate_and_sanitize_query(data):
     if re.search(r'<script|javascript:|data:|vbscript:', query, re.IGNORECASE):
         return False, "Invalid characters detected"
     
-    # SQL injection basic check
-    if re.search(r'(union|select|insert|update|delete|drop|create|alter)\s', query, re.IGNORECASE):
-        return False, "Invalid query format"
+    # Check for potential injection attempts
+    dangerous_patterns = [
+        r'union\s+select', r'drop\s+table', r'insert\s+into',
+        r'delete\s+from', r'update\s+set', r'exec\s*\(',
+        r'script\s*>', r'onerror\s*=', r'onclick\s*='
+    ]
     
-    return True, query
+    for pattern in dangerous_patterns:
+        if re.search(pattern, query, re.IGNORECASE):
+            return False, "Security violation detected"
+    
+    return True, "Valid"
+
 
 def is_authenticated():
     """Check if user is authenticated"""
