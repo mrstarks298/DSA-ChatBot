@@ -948,5 +948,40 @@ console.log('✅ App modules exposed to window.app');
   window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);
   });
+  // ===== EXPOSE APP OBJECT FOR OTHER MODULES ===== 
+// This MUST be at the end of the file
+window.app = {
+    state: AppState,
+    auth: AuthManager,
+    util: Utils,
+    storage: StorageManager,
+    theme: ThemeManager,
+    sidebar: SidebarManager,
+    saved: SavedMessagesManager,
+    render: {
+        // Add basic render functions that chat module expects
+        renderMessage: function(content, type) {
+            console.log(`Rendering ${type} message:`, content);
+        }
+    }
+};
+
+// Mark as initialized
+AppState.isInitialized = true;
+console.log('✅ App modules exposed to window.app');
+
+// Initialize all managers
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        AuthManager.init();
+        ThemeManager.init();
+        SidebarManager.init();
+        SavedMessagesManager.init();
+        console.log('✅ All app modules initialized');
+    } catch (error) {
+        console.error('❌ Module initialization error:', error);
+    }
+});
+
 
 })();
