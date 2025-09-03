@@ -1,4 +1,4 @@
-# app/auth/routes.py - FIXED Session Persistence Issues
+# CRITICAL FIX: app/auth/routes.py - Session Persistence FIXED
 
 import time
 import secrets
@@ -55,8 +55,9 @@ def _create_google_flow():
         logger.error(f"Failed to create Google OAuth flow: {e}")
         return None
 
+# ✅ CRITICAL FIX: Removed strict user agent validation (main cause of session loss)
 def _validate_session():
-    """✅ FIXED: Relaxed session validation for better persistence"""
+    """Validate user session - RELAXED for OAuth compatibility"""
     try:
         # Check for required session data
         if 'google_id' not in session:
@@ -80,8 +81,8 @@ def _validate_session():
             logger.debug(f"Session expired: {session_age} > {max_age}")
             return False, "Session expired"
         
-        # ✅ CRITICAL FIX: Remove strict user agent validation (causes OAuth issues)
-        # This was causing sessions to be invalidated after OAuth redirect
+        # ✅ CRITICAL: REMOVED strict user agent validation
+        # This was causing sessions to be invalidated after OAuth redirects
         # user_agent = session.get('user_agent')
         # current_user_agent = request.headers.get('User-Agent', '')
         # if user_agent and user_agent != current_user_agent:
@@ -121,7 +122,7 @@ def login():
         session['oauth_state'] = state
         session['oauth_start_time'] = time.time()
         
-        # Store user agent for session validation (optional now)
+        # Store user agent for session validation (but don't validate strictly)
         session['user_agent'] = request.headers.get('User-Agent', '')
         
         # Generate authorization URL
@@ -144,7 +145,7 @@ def login():
 
 @bp.route('/oauth2callback')
 def oauth2callback():
-    """✅ FIXED: Enhanced OAuth callback with proper session creation"""
+    """✅ CRITICAL FIX: Handle OAuth2 callback with PROPER session creation"""
     try:
         # Validate OAuth state parameter
         state = request.args.get('state')
@@ -230,8 +231,8 @@ def oauth2callback():
                 "message": "Incomplete user information"
             }), 400
         
-        # ✅ CRITICAL FIX: Proper session creation with persistence
-        session.permanent = True  # Mark session as permanent
+        # ✅ CRITICAL FIX: PROPER session creation with persistence
+        session.permanent = True  # Mark session as permanent - CRITICAL
         session['google_id'] = user_id
         session['email'] = email
         session['name'] = name
@@ -239,11 +240,11 @@ def oauth2callback():
         session['login_time'] = time.time()
         session['user_agent'] = request.headers.get('User-Agent', '')
         
-        # ✅ CRITICAL: Force session save
+        # ✅ CRITICAL: Force session save - without this, session won't persist
         session.modified = True
         
         logger.info(f"✅ Session created for user: {email}")
-        logger.info(f"✅ Session data: google_id={user_id}")
+        logger.info(f"✅ Session data saved: google_id={user_id}")
         
         # Clear OAuth temporary data
         session.pop('oauth_state', None)
@@ -290,7 +291,7 @@ def logout():
 
 @bp.route('/auth-status')
 def auth_status():
-    """✅ IMPROVED: Get current authentication status with better debugging"""
+    """✅ IMPROVED: Get current authentication status WITHOUT clearing session"""
     try:
         logger.debug(f"Auth status check - session keys: {list(session.keys())}")
         
@@ -308,7 +309,8 @@ def auth_status():
             logger.debug(f"✅ Auth status: User authenticated as {user_data['email']}")
             return jsonify(user_data)
         else:
-            # ✅ IMPORTANT: Don't clear session immediately on auth check failure
+            # ✅ CRITICAL: DON'T clear session on auth check failure
+            # The old version was clearing sessions here, causing logout loops
             logger.debug(f"❌ Auth status: {message}")
             return jsonify({
                 "is_authenticated": False,
@@ -368,15 +370,15 @@ def session_debug():
         
         return jsonify({
             "session_data": session_data,
-            "session_cookie_name": current_app.config['SESSION_COOKIE_NAME'],
-            "session_id_in_cookies": request.cookies.get(current_app.config['SESSION_COOKIE_NAME'], 'No cookie found'),
+            "session_cookie_name": current_app.config.get('SESSION_COOKIE_NAME', 'session'),
+            "session_id_in_cookies": request.cookies.get(current_app.config.get('SESSION_COOKIE_NAME', 'session'), 'No cookie found'),
             "all_cookies": dict(request.cookies),
             "validation_result": validation_result,
             "config_info": {
-                "cookie_secure": current_app.config['SESSION_COOKIE_SECURE'],
-                "cookie_httponly": current_app.config['SESSION_COOKIE_HTTPONLY'],
-                "cookie_samesite": current_app.config['SESSION_COOKIE_SAMESITE'],
-                "session_lifetime_hours": current_app.config['PERMANENT_SESSION_LIFETIME'].total_seconds() / 3600
+                "cookie_secure": current_app.config.get('SESSION_COOKIE_SECURE', False),
+                "cookie_httponly": current_app.config.get('SESSION_COOKIE_HTTPONLY', True),
+                "cookie_samesite": current_app.config.get('SESSION_COOKIE_SAMESITE', 'Lax'),
+                "session_lifetime_hours": current_app.config.get('PERMANENT_SESSION_LIFETIME', 28800) / 3600 if hasattr(current_app.config.get('PERMANENT_SESSION_LIFETIME'), 'total_seconds') else current_app.config.get('PERMANENT_SESSION_LIFETIME').total_seconds() / 3600
             }
         })
     except Exception as e:
