@@ -8,10 +8,11 @@
     <meta name="theme-color" content="#1B7EFE">
     
     <!-- Preload critical resources -->
-    <link rel="preload" href="/static/css/app.css" as="style">
-    <link rel="preload" href="/static/js/app-auth.js" as="script">
-    <link rel="preload" href="/static/js/app-chat.js" as="script">
-    <link rel="preload" href="/static/js/app-init.js" as="script">
+<!-- Load scripts in this EXACT order -->
+<script src="{{ url_for('static', filename='js/app-auth.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app-chat-core.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app-init.js') }}"></script>
+
     
     <!-- Stylesheets -->
     <link rel="stylesheet" href="/static/css/app.css">
