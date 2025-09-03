@@ -439,9 +439,11 @@ def logout():
 # Session validation endpoint for frontend auth checks
 @bp.route('/auth-status')
 def auth_status():
-    """Check current authentication status"""
+    """Check current authentication status - CRITICAL MISSING ENDPOINT"""
     try:
-        if 'google_id' in session:
+        is_valid, message = _is_session_valid()
+        
+        if is_valid and 'google_id' in session:
             return jsonify({
                 "is_authenticated": True,
                 "user_id": session.get('google_id'),
@@ -450,10 +452,29 @@ def auth_status():
                 "picture": session.get('picture')
             })
         else:
-            return jsonify({"is_authenticated": False})
+            return jsonify({
+                "is_authenticated": False,
+                "reason": message if not is_valid else "No session"
+            })
     except Exception as e:
         logger.error(f"Auth status check error: {e}")
-        return jsonify({"is_authenticated": False, "error": str(e)})
+        return jsonify({
+            "is_authenticated": False, 
+            "error": str(e)
+        }), 500
+
+@bp.route('/logout', methods=['POST'])
+def logout():
+    """Logout endpoint - also missing"""
+    try:
+        # Clear all session data
+        session.clear()
+        logger.info("User logged out successfully")
+        return jsonify({"success": True, "message": "Logged out successfully"})
+    except Exception as e:
+        logger.error(f"Logout error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 
 @bp.route('/validate-session')
