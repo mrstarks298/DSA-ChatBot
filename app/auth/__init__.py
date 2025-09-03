@@ -1,3 +1,3 @@
 from flask import Blueprint
-bp = Blueprint("main", __name__)
+bp = Blueprint("auth", __name__)
 from . import routes  # noqa
