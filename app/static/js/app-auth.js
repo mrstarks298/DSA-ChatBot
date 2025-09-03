@@ -1,4 +1,4 @@
-// ===== DSA MENTOR - AUTHENTICATION SYSTEM =====
+// ===== DSA MENTOR - FIXED AUTHENTICATION SYSTEM WITH SESSION PERSISTENCE =====
 (() => {
     'use strict';
 
@@ -174,6 +174,7 @@
 
         checkAuthentication() {
             const user = AppState.serverUser;
+            
             if (user?.is_authenticated && user.name && user.email) {
                 this.authenticatedState();
                 return true;
@@ -187,6 +188,7 @@
             } else {
                 this.unauthenticatedState();
             }
+
             return false;
         },
 
@@ -196,6 +198,7 @@
             this.updateUserProfile(AppState.serverUser);
             this.enableChatInterface();
             this.startPeriodicAuthCheck();
+
             StorageManager.set(StorageManager.keys.USER_DATA, AppState.serverUser);
             console.log('✅ User authenticated:', AppState.serverUser.email);
         },
@@ -205,6 +208,7 @@
             this.hideSharedThreadBanner();
             this.disableChatInterface();
             this.stopPeriodicAuthCheck();
+
             StorageManager.remove(StorageManager.keys.USER_DATA);
             console.log('🔒 User not authenticated');
         },
@@ -320,9 +324,11 @@
             if (AppState.authCheckInterval) {
                 clearInterval(AppState.authCheckInterval);
             }
+            
+            // ✅ IMPROVED: More frequent auth checks (2 minutes)
             AppState.authCheckInterval = setInterval(() => {
                 this.performAuthCheck();
-            }, 300000); // 5 minutes
+            }, 120000); // 2 minutes instead of 5
         },
 
         stopPeriodicAuthCheck() {
@@ -332,6 +338,7 @@
             }
         },
 
+        // ✅ CRITICAL FIX: Enhanced auth check with proper session handling
         async performAuthCheck(force = false) {
             if (AppState.authCheckInProgress && !force) {
                 console.log('Auth check already in progress, skipping...');
@@ -344,16 +351,30 @@
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+                // ✅ CRITICAL: Include credentials and cache headers for session cookies
                 const response = await fetch('/auth/auth-status', {
                     method: 'GET',
-                    credentials: 'same-origin',
-                    signal: controller.signal
+                    credentials: 'same-origin',  // Essential for session cookies
+                    cache: 'no-cache',           // Don't cache auth responses
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
                 });
 
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
                     console.warn('Auth check failed:', response.status);
+                    if (response.status === 401) {
+                        // Session expired or invalid
+                        if (AppState.serverUser?.is_authenticated) {
+                            AppState.serverUser = { is_authenticated: false };
+                            this.checkAuthentication();
+                            Utils.showToast('Session expired. Please log in again.', 'warning');
+                        }
+                    }
                     return;
                 }
 
@@ -361,6 +382,13 @@
                 const wasAuthenticated = AppState.serverUser?.is_authenticated;
                 const nowAuthenticated = data.is_authenticated;
 
+                console.log('Auth check result:', { 
+                    wasAuthenticated, 
+                    nowAuthenticated, 
+                    email: data.email 
+                });
+
+                // Handle authentication state changes
                 if (wasAuthenticated !== nowAuthenticated) {
                     console.log('Authentication status changed:', { was: wasAuthenticated, now: nowAuthenticated });
                     
@@ -384,6 +412,7 @@
                     return;
                 }
 
+                // Handle user ID changes (different user logged in)
                 if (nowAuthenticated && AppState.serverUser?.id && data.user_id &&
                     AppState.serverUser.id !== data.user_id) {
                     console.log('Different user logged in, updating state...');
@@ -396,6 +425,17 @@
                     };
                     this.updateUserProfile(AppState.serverUser);
                     StorageManager.set(StorageManager.keys.USER_DATA, AppState.serverUser);
+                }
+
+                // ✅ IMPORTANT: Update stored user data if authenticated
+                if (nowAuthenticated && data.email) {
+                    StorageManager.set(StorageManager.keys.USER_DATA, {
+                        is_authenticated: true,
+                        id: data.user_id,
+                        name: data.name,
+                        email: data.email,
+                        picture: data.picture
+                    });
                 }
 
             } catch (error) {
@@ -411,9 +451,13 @@
 
         async logout() {
             try {
+                // ✅ CRITICAL: Include credentials for session cookies
                 const response = await fetch('/auth/logout', {
                     method: 'POST',
-                    credentials: 'same-origin'
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
                 });
 
                 if (response.ok) {
@@ -438,6 +482,27 @@
 
         isAuthenticated() {
             return AppState.serverUser?.is_authenticated === true;
+        },
+
+        // ✅ NEW: Debug function to check session
+        async debugSession() {
+            try {
+                const response = await fetch('/auth/session-debug', {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    cache: 'no-cache'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('🔍 Session Debug:', data);
+                    return data;
+                } else {
+                    console.error('Session debug failed:', response.status);
+                }
+            } catch (error) {
+                console.error('Session debug error:', error);
+            }
         }
     };
 
@@ -699,7 +764,7 @@
     // ===== INITIALIZATION =====
     function initializeApp() {
         try {
-            console.log('🚀 Initializing DSA Mentor Authentication System...');
+            console.log('🚀 Initializing DSA Mentor Authentication System with Session Fixes...');
 
             // Initialize managers
             AuthManager.init();
@@ -721,8 +786,7 @@
                 storage: StorageManager
             };
 
-            console.log('✅ DSA Mentor Authentication System initialized successfully');
-
+            console.log('✅ DSA Mentor Authentication System initialized successfully with session persistence fixes');
         } catch (error) {
             console.error('❌ Failed to initialize authentication system:', error);
         }
@@ -742,6 +806,15 @@
         if (message) {
             Utils.showToast('Loading saved message...', 'info');
             // Implementation would load the message into chat
+        }
+    };
+
+    // ✅ NEW: Global debug function
+    window.debugAuth = async function() {
+        if (window.app && window.app.auth) {
+            return await window.app.auth.debugSession();
+        } else {
+            console.error('Auth system not loaded');
         }
     };
 
