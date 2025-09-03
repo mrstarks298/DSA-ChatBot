@@ -2,220 +2,307 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>DSA Mentor - Your AI Learning Companion</title>
-    <meta name="description" content="Master Data Structures and Algorithms with AI-powered personalized learning">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#1B7EFE">
+    <meta name="description" content="DSA Mentor - Your AI-powered companion for mastering Data Structures and Algorithms">
+    <meta name="keywords" content="DSA, Data Structures, Algorithms, Programming, Computer Science, Interview Prep">
+    <meta name="author" content="DSA Mentor Team">
     
-    <!-- Preload critical resources -->
-<!-- Load scripts in this EXACT order -->
-<script src="{{ url_for('static', filename='js/app-auth.js') }}"></script>
-<script src="{{ url_for('static', filename='js/app-chat-core.js') }}"></script>
-<script src="{{ url_for('static', filename='js/app-init.js') }}"></script>
-
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://dsa-chatbot-3rll.onrender.com">
+    <meta property="og:title" content="DSA Mentor - AI-Powered Learning">
+    <meta property="og:description" content="Master Data Structures and Algorithms with personalized AI guidance">
+    <meta property="og:image" content="/static/assets/og-image.png">
     
-    <!-- Stylesheets -->
-    <link rel="stylesheet" href="/static/css/app.css">
-    
-    <!-- PWA manifest -->
-    <link rel="manifest" href="/static/js/manifest.json">
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://dsa-chatbot-3rll.onrender.com">
+    <meta name="twitter:title" content="DSA Mentor - AI-Powered Learning">
+    <meta name="twitter:description" content="Master Data Structures and Algorithms with personalized AI guidance">
+    <meta name="twitter:image" content="/static/assets/twitter-image.png">
     
     <!-- Favicon -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/js/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/static/js/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/assets/apple-touch-icon.png">
     
-    <!-- Open Graph tags -->
-    <meta property="og:title" content="DSA Mentor - AI Learning Companion">
-    <meta property="og:description" content="Master Data Structures and Algorithms with personalized AI guidance">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="{{ request.url }}">
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+    
+    <title>DSA Mentor - AI-Powered Learning</title>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/app.css">
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="/static/js/app-auth.js" as="script">
+    <link rel="preload" href="/static/js/app-chat.js" as="script">
+    
+    <!-- Google Fonts (optional, already defined in CSS) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 </head>
 
 <body data-theme="light">
-    <!-- Shared Thread Banner (hidden by default) -->
-    <div id="sharedThreadBanner" class="shared-thread-banner" style="display: none;">
-        <div class="banner-content">
-            <div class="banner-icon">👥</div>
-            <div class="banner-text">
-                <h3>You're viewing a shared conversation</h3>
-                <p>Sign in to start your own personalized learning journey</p>
-            </div>
-            <button class="banner-login-btn" onclick="window.location.href='/login'">
-                <span>🔑</span>
-                <span>Sign In</span>
-            </button>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loading-spinner">
+            <div class="spinner-icon">🚀</div>
+            <div class="loading-text">Loading DSA Mentor...</div>
         </div>
     </div>
 
-    <!-- Main App Container -->
+    <!-- Authentication Overlay -->
+    <div id="authOverlay" class="auth-overlay">
+        <div class="auth-container">
+            <div class="auth-header">
+                <div class="logo">
+                    <div class="logo-icon">🚀</div>
+                    <span class="logo-text">DSA Mentor</span>
+                </div>
+                <h1>Welcome to DSA Mentor</h1>
+                <p>Your AI-powered companion for mastering Data Structures and Algorithms</p>
+            </div>
+            
+            <div class="auth-content">
+                <div class="auth-benefits">
+                    <div class="benefit">
+                        <div class="benefit-icon">🎯</div>
+                        <h3>Personalized Learning</h3>
+                        <p>Get tailored explanations and practice problems based on your level</p>
+                    </div>
+                    <div class="benefit">
+                        <div class="benefit-icon">💡</div>
+                        <h3>Interactive Q&A</h3>
+                        <p>Ask questions and get instant, detailed responses about any DSA concept</p>
+                    </div>
+                    <div class="benefit">
+                        <div class="benefit-icon">📊</div>
+                        <h3>Progress Tracking</h3>
+                        <p>Monitor your learning journey and save important conversations</p>
+                    </div>
+                </div>
+                
+                <div class="auth-actions">
+                    <a href="/auth/login" class="login-btn">
+                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" class="google-icon">
+                        Sign in with Google
+                    </a>
+                    <p class="auth-privacy">
+                        By signing in, you agree to our Terms of Service and Privacy Policy
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shared Thread Banner -->
+    <div id="sharedThreadBanner" class="shared-thread-banner" style="display: none;">
+        <div class="banner-content">
+            <div class="banner-text">
+                <strong>👥 You're viewing a shared conversation</strong>
+                <span>Sign in to start your own learning journey</span>
+            </div>
+            <a href="/auth/login" class="banner-login-btn">Sign In</a>
+        </div>
+    </div>
+
+    <!-- Main Application Container -->
     <div class="app-container">
         <!-- Sidebar -->
-        <aside class="sidebar" id="sidebar">
-            <!-- Sidebar Header -->
+        <aside id="sidebar" class="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
                     <div class="logo-icon">🚀</div>
-                    <div class="logo-text">DSA Mentor</div>
+                    <span class="logo-text">DSA Mentor</span>
                 </div>
-                <button class="header-btn new-thread-btn" id="newThreadBtn" title="Start New Conversation">
-                    <span>➕</span>
+                <button id="newThreadBtn" class="new-thread-btn" title="Start New Conversation">
+                    <span>+ New Chat</span>
                 </button>
             </div>
 
-            <!-- Sidebar Content -->
             <div class="sidebar-content">
-                <!-- Saved Messages Section -->
-                <div class="section-label">💾 Saved Messages</div>
-                <div class="saved-list" id="savedList">
+                <div class="section-label">Saved Messages</div>
+                <div id="savedList" class="saved-list">
                     <div class="empty-saved">
                         <div class="empty-saved-icon">📝</div>
                         <p>No saved messages yet</p>
                         <p>Save important conversations for later</p>
                     </div>
                 </div>
-                <button class="clear-saved-btn" id="clearSavedBtn" style="display: none;">
+                <button id="clearSavedBtn" class="clear-saved-btn" style="display: none;">
                     Clear All Saved
                 </button>
-            </div>
 
-            <!-- Profile Section -->
-            <div class="profile-section">
-                <div class="profile-container">
-                    <div class="profile-avatar">?</div>
+                <!-- User Profile (shown when authenticated) -->
+                <div class="user-profile" style="margin-top: auto; padding-top: 20px;">
                     <div class="profile-info">
-                        <div class="profile-name">Guest User</div>
-                        <div class="profile-status">Sign in to save progress</div>
+                        <div class="profile-avatar">U</div>
+                        <div class="profile-details">
+                            <div class="profile-name">Guest User</div>
+                            <div class="profile-status">Not signed in</div>
+                        </div>
                     </div>
-                    <button class="header-btn" id="themeToggle" title="Toggle Theme">
-                        <span class="sun-icon">☀️</span>
-                        <span class="moon-icon" style="display: none;">🌙</span>
-                    </button>
+                    <div class="profile-actions">
+                        <button id="themeToggle" class="theme-toggle" title="Toggle Theme">
+                            <span class="sun-icon">☀️</span>
+                            <span class="moon-icon" style="display: none;">🌙</span>
+                        </button>
+                        <button onclick="window.app?.auth?.logout()" class="logout-btn" title="Logout" style="display: none;">
+                            🚪
+                        </button>
+                    </div>
                 </div>
             </div>
         </aside>
 
-        <!-- Mobile Sidebar Overlay -->
-        <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
-        <!-- Main Content -->
+        <!-- Main Content Area -->
         <main class="main-content">
-            <!-- Header -->
-            <header class="header">
-                <button class="mobile-menu-btn" id="mobileMenuBtn">
-                    <span>☰</span>
+            <!-- Mobile Header -->
+            <header class="mobile-header">
+                <button id="mobileMenuBtn" class="mobile-menu-btn">
+                    <span class="hamburger-icon">☰</span>
                 </button>
-                <h1 class="header-title">DSA Learning Assistant</h1>
-                <div class="header-actions">
-                    <button class="header-btn" id="downloadBtn" title="Export Chat">
-                        <span>📥</span>
-                    </button>
-                    <button class="header-btn" id="shareBtn" title="Share Conversation">
-                        <span>🔗</span>
-                    </button>
+                <div class="mobile-logo">
+                    <div class="logo-icon">🚀</div>
+                    <span class="logo-text">DSA Mentor</span>
+                </div>
+                <div class="mobile-actions">
+                    <button id="downloadBtn" class="action-btn" title="Download Chat">📄</button>
+                    <button id="shareBtn" class="action-btn" title="Share Chat">🔗</button>
                 </div>
             </header>
 
-            <!-- Chat Area -->
-            <div class="chat-area" id="chatArea">
-                <div class="chat-content" id="chatContent">
-                    <!-- Welcome Screen -->
-                    <div class="welcome-screen" id="welcomeScreen">
-                        <h2 class="welcome-title">Welcome to DSA Mentor</h2>
-                        <p class="welcome-subtitle">Your AI-powered companion for mastering Data Structures and Algorithms</p>
+            <!-- Welcome Screen -->
+            <div id="welcomeScreen" class="welcome-screen">
+                <div class="welcome-hero">
+                    <div class="hero-content">
+                        <h1>Welcome to DSA Mentor</h1>
+                        <p class="hero-subtitle">Your AI-powered companion for mastering Data Structures and Algorithms</p>
                         
-                        <!-- Feature Cards -->
-                        <div class="suggestion-cards">
-                            <div class="suggestion-card" onclick="sendSuggestion('Explain binary search algorithm')">
-                                <h4>🔍 Algorithm Analysis</h4>
+                        <div class="feature-grid">
+                            <div class="feature-card">
+                                <div class="feature-icon">🔍</div>
+                                <h3>Algorithm Analysis</h3>
                                 <p>Learn about time and space complexity with detailed explanations</p>
                             </div>
-                            <div class="suggestion-card" onclick="sendSuggestion('Show me how to implement a binary tree')">
-                                <h4>💻 Code Implementation</h4>
+                            
+                            <div class="feature-card">
+                                <div class="feature-icon">💻</div>
+                                <h3>Code Implementation</h3>
                                 <p>Get clean, well-commented code in your preferred language</p>
                             </div>
-                            <div class="suggestion-card" onclick="sendSuggestion('What are common graph algorithms?')">
-                                <h4>🎯 Problem Solving</h4>
+                            
+                            <div class="feature-card">
+                                <div class="feature-icon">🎯</div>
+                                <h3>Problem Solving</h3>
                                 <p>Discover patterns and techniques for interview success</p>
                             </div>
-                            <div class="suggestion-card" onclick="sendSuggestion('Generate practice problems for arrays')">
-                                <h4>📝 Practice Problems</h4>
+                            
+                            <div class="feature-card">
+                                <div class="feature-icon">📝</div>
+                                <h3>Practice Problems</h3>
                                 <p>Find curated problems to strengthen your skills</p>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                <!-- Suggestion Cards -->
+                <div class="suggestion-section">
+                    <h3>Quick Start</h3>
+                    <div class="suggestion-grid">
+                        <div class="suggestion-card" onclick="sendSuggestion('Explain binary search algorithm with time complexity')">
+                            <div class="suggestion-icon">🔍</div>
+                            <div class="suggestion-text">Binary Search Algorithm</div>
+                        </div>
+                        
+                        <div class="suggestion-card" onclick="sendSuggestion('How do I implement a balanced binary search tree?')">
+                            <div class="suggestion-icon">🌳</div>
+                            <div class="suggestion-text">Binary Search Trees</div>
+                        </div>
+                        
+                        <div class="suggestion-card" onclick="sendSuggestion('Generate practice problems for dynamic programming')">
+                            <div class="suggestion-icon">🧩</div>
+                            <div class="suggestion-text">Practice Problems</div>
+                        </div>
+                        
+                        <div class="suggestion-card" onclick="sendSuggestion('Compare merge sort and quick sort algorithms')">
+                            <div class="suggestion-icon">⚡</div>
+                            <div class="suggestion-text">Sorting Algorithms</div>
+                        </div>
+                        
+                        <div class="suggestion-card" onclick="sendSuggestion('Explain graph traversal algorithms: DFS vs BFS')">
+                            <div class="suggestion-icon">🕸️</div>
+                            <div class="suggestion-text">Graph Algorithms</div>
+                        </div>
+                        
+                        <div class="suggestion-card" onclick="sendSuggestion('What are the different types of data structures?')">
+                            <div class="suggestion-icon">📊</div>
+                            <div class="suggestion-text">Data Structures</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Input Area -->
-            <div class="input-area">
-                <div class="input-container">
-                    <div class="input-wrapper">
-                        <textarea 
-                            id="chatInput" 
-                            class="chat-input" 
-                            placeholder="Ask me anything about Data Structures and Algorithms..."
-                            rows="1"
-                            maxlength="2000"
-                            disabled
-                        ></textarea>
-                        <button id="sendButton" class="send-button" disabled>
-                            <span>Send</span>
-                            <span>🚀</span>
-                        </button>
-                    </div>
+            <!-- Chat Content -->
+            <div id="chatContent" class="chat-content">
+                <!-- Messages will be dynamically added here -->
+            </div>
+
+            <!-- Chat Input -->
+            <div class="chat-input-container">
+                <div class="chat-input-wrapper">
+                    <textarea 
+                        id="chatInput" 
+                        class="chat-input" 
+                        placeholder="Ask me anything about Data Structures and Algorithms..."
+                        rows="1"
+                        disabled
+                    ></textarea>
+                    <button id="sendButton" class="send-button" disabled>
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+                <div class="input-footer">
+                    <span class="input-hint">Press Enter to send, Shift+Enter for new line</span>
                 </div>
             </div>
         </main>
     </div>
 
-    <!-- Authentication Overlay -->
-    <div class="auth-overlay" id="authOverlay">
-        <div class="auth-container">
-            <div class="auth-icon">
-                <div class="laptop-icon"></div>
-                <div class="lock-icon">🔒</div>
+    <!-- Sidebar Overlay for Mobile -->
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+    <!-- Video Modal -->
+    <div id="videoModal" class="modal video-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="videoTitle">Video Tutorial</h3>
+                <button class="modal-close" onclick="closeVideoModal()">×</button>
             </div>
-            <h2 class="auth-title">Welcome to <span class="problem-text">DSA Mentor</span></h2>
-            <p class="auth-subtitle">Sign in to unlock personalized learning and save your progress</p>
-            
-            <button class="login-btn" onclick="window.location.href='/login'">
-                <span class="google-icon"></span>
-                Continue with Google
-            </button>
-            
-            <div class="feature-list">
-                <div class="feature-item">✨ Personalized learning paths</div>
-                <div class="feature-item">📚 Save important conversations</div>
-                <div class="feature-item">🎯 Track your progress</div>
-                <div class="feature-item">🔄 Sync across devices</div>
+            <div class="modal-body">
+                <iframe id="videoEmbed" width="100%" height="400" frameborder="0" allowfullscreen></iframe>
             </div>
         </div>
     </div>
 
     <!-- Share Modal -->
-    <div class="modal-overlay" id="shareModal">
-        <div class="modal">
-            <div class="modal-header">Share Conversation</div>
-            <div class="modal-content">
-                <p>Share this conversation with others using the link below:</p>
-                <input type="text" id="shareLink" readonly class="share-input">
+    <div id="shareModal" class="modal share-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Share Conversation</h3>
+                <button class="modal-close" onclick="closeShareModal()">×</button>
             </div>
-            <div class="modal-actions">
-                <button class="modal-btn modal-btn-secondary" onclick="closeShareModal()">Cancel</button>
-                <button class="modal-btn" onclick="copyShareLink()">Copy Link</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Video Modal -->
-    <div class="video-modal" id="videoModal">
-        <div class="video-modal-content">
-            <button class="video-modal-close" onclick="closeVideoModal()">&times;</button>
-            <div class="video-modal-header">
-                <h3 class="video-modal-title" id="videoModalTitle">Learning Video</h3>
-            </div>
-            <div class="video-embed-container">
-                <iframe id="videoEmbed" class="video-embed" frameborder="0" allowfullscreen></iframe>
+            <div class="modal-body">
+                <p>Share this conversation with others:</p>
+                <div class="share-link-container">
+                    <input type="text" id="shareLink" class="share-link-input" readonly>
+                    <button onclick="copyShareLink()" class="copy-link-btn">Copy</button>
+                </div>
+                <div class="share-options">
+                    <p class="share-note">Recipients will be able to view this conversation but not interact with it.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -223,105 +310,58 @@
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
-    <!-- Loading Screen -->
-    <div id="loadingScreen" class="loading-screen" style="display: none;">
-        <div class="loading-spinner"></div>
-        <p>Initializing DSA Mentor...</p>
-    </div>
-
-    <!-- Scripts -->
+    <!-- Server Data -->
     <script>
-        // Initialize user data from server
-        window.SERVER_USER = {{ user|tojson|safe if user else '{"is_authenticated": false}' }};
-        
-        // Global configuration
-        window.APP_CONFIG = {
-            apiBaseUrl: '{{ request.url_root.rstrip("/") }}',
-            maxQueryLength: 2000,
-            streamingEnabled: true,
-            version: '2.0.0'
-        };
+        window.SERVER_USER = {{ user_data|tojson if user_data else '{"is_authenticated": false}' }};
+        window.APP_VERSION = "2.0.0";
     </script>
-    
-    <!-- Main Application Scripts -->
-    <script src="/static/app-auth.js" defer></script>
-    <script src="/static/app-chat.js" defer></script>
-    
-    <!-- Additional Features -->
+
+    <!-- Application Scripts -->
+    <script src="/static/js/app-auth.js"></script>
+    <script src="/static/js/app-chat.js"></script>
+    <script src="/static/js/app-init.js"></script>
+
+    <!-- Performance and Analytics -->
     <script>
-        // Suggestion handler
-        function sendSuggestion(text) {
-            const chatInput = document.getElementById('chatInput');
-            if (chatInput && !chatInput.disabled) {
-                chatInput.value = text;
-                chatInput.focus();
-                // Trigger send if user is authenticated
-                if (window.app && window.app.auth && window.app.auth.isAuthenticated()) {
-                    window.sendMessage();
-                }
-            }
-        }
-
-        // Share modal functions
-        function closeShareModal() {
-            document.getElementById('shareModal').classList.remove('active');
-        }
-
-        function copyShareLink() {
-            const shareLink = document.getElementById('shareLink');
-            shareLink.select();
-            document.execCommand('copy');
-            showToast('Link copied to clipboard!');
-            closeShareModal();
-        }
-
-        // Video modal functions
-        function closeVideoModal() {
-            const modal = document.getElementById('videoModal');
-            const embed = document.getElementById('videoEmbed');
-            modal.classList.remove('active');
-            embed.src = '';
-        }
-
-        // Global toast function
-        function showToast(message) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }
-
-        // Auto-resize textarea
-        document.addEventListener('DOMContentLoaded', function() {
-            const textarea = document.getElementById('chatInput');
-            if (textarea) {
-                textarea.addEventListener('input', function() {
-                    this.style.height = 'auto';
-                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-                });
-                
-                // Enter key handler
-                textarea.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        window.sendMessage && window.sendMessage();
-                    }
-                });
+        // Performance monitoring
+        window.addEventListener('load', () => {
+            if ('performance' in window && 'timing' in performance) {
+                const timing = performance.timing;
+                const loadTime = timing.loadEventEnd - timing.navigationStart;
+                console.log(`📊 Page loaded in ${loadTime}ms`);
             }
         });
 
-        // Service Worker Registration (for PWA functionality)
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
+        // Service Worker for PWA
+        if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+            window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/static/sw.js')
-                    .then(function(registration) {
-                        console.log('SW registered: ', registration);
-                    })
-                    .catch(function(registrationError) {
-                        console.log('SW registration failed: ', registrationError);
-                    });
+                    .then(registration => console.log('SW registered'))
+                    .catch(error => console.log('SW registration failed'));
             });
         }
+    </script>
+
+    <!-- Structured Data for SEO -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "DSA Mentor",
+        "description": "AI-powered companion for mastering Data Structures and Algorithms",
+        "url": "https://dsa-chatbot-3rll.onrender.com",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web Browser",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "author": {
+            "@type": "Organization",
+            "name": "DSA Mentor Team"
+        }
+    }
     </script>
 </body>
 </html>
