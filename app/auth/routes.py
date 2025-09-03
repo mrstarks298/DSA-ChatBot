@@ -1,18 +1,19 @@
-# Updated app/auth/routes.py - Enhanced Authentication with Frontend Integration
-
+# app/auth/routes.py - Enhanced Authentication Routes with Production Optimizations
 import time
 import secrets
-from . import bp
-from flask import request, session, redirect, jsonify, current_app, render_template_string, make_response
+import logging
+from flask import request, session, redirect, jsonify, current_app, make_response
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_auth_requests
-import logging
+
+from . import bp
 
 logger = logging.getLogger("dsa-mentor")
 
-def _google_flow():
-    """Create Google OAuth flow with proper error handling"""
+
+def _create_google_flow():
+    """Create Google OAuth flow with comprehensive error handling"""
     try:
         client_id = current_app.config.get("GOOGLE_CLIENT_ID")
         client_secret = current_app.config.get("GOOGLE_CLIENT_SECRET")
@@ -20,14 +21,20 @@ def _google_flow():
         if not client_id or not client_secret:
             logger.error("Google OAuth credentials not configured")
             return None
-            
-        flow = Flow.from_client_config(
-            {"web": {
+        
+        # Create OAuth flow configuration
+        client_config = {
+            "web": {
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token"
-            }},
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [current_app.config.get("REDIRECT_URI")]
+            }
+        }
+        
+        flow = Flow.from_client_config(
+            client_config,
             scopes=[
                 "https://www.googleapis.com/auth/userinfo.email",
                 "https://www.googleapis.com/auth/userinfo.profile",
@@ -35,474 +42,315 @@ def _google_flow():
             ]
         )
         
-        # Dynamic redirect URI configuration
+        # Set redirect URI
         redirect_uri = current_app.config.get("REDIRECT_URI")
         if not redirect_uri:
-            # Fallback to auto-detect for development
-            redirect_uri = request.url_root.rstrip('/') + '/oauth2callback'
+            # Fallback for development
+            redirect_uri = request.url_root.rstrip('/') + '/auth/oauth2callback'
         
         flow.redirect_uri = redirect_uri
-        logger.info(f"OAuth flow configured with redirect URI: {redirect_uri}")
+        
+        logger.debug(f"OAuth flow configured with redirect URI: {redirect_uri}")
         return flow
         
     except Exception as e:
-        logger.error(f"Google flow creation error: {e}")
+        logger.error(f"Failed to create Google OAuth flow: {e}")
         return None
 
-def _is_session_valid():
-    """Validate user session with improved error handling"""
+
+def _validate_session():
+    """Validate user session with enhanced security checks"""
     try:
+        # Check for required session data
         if 'google_id' not in session:
-            return (False, "No session")
+            return False, "No active session"
         
         if 'login_time' not in session:
-            return (False, "No login timestamp")
+            return False, "Invalid session data"
         
         # Check session expiration
         session_age = time.time() - session.get('login_time', 0)
-        max_age = current_app.config.get('PERMANENT_SESSION_LIFETIME', 3600)
+        max_age = current_app.config.get('PERMANENT_SESSION_LIFETIME')
         
         if hasattr(max_age, 'total_seconds'):
             max_age = max_age.total_seconds()
+        else:
+            max_age = 7200  # 2 hours default
         
         if session_age > max_age:
-            return (False, "Session expired")
+            return False, "Session expired"
         
-        return (True, "Valid")
+        # Additional security checks
+        user_agent = session.get('user_agent')
+        current_user_agent = request.headers.get('User-Agent', '')
+        
+        if user_agent and user_agent != current_user_agent:
+            logger.warning(f"User agent mismatch for user {session.get('email')}")
+            return False, "Session security violation"
+        
+        return True, "Valid session"
         
     except Exception as e:
         logger.error(f"Session validation error: {e}")
-        return (False, "Session validation failed")
+        return False, "Session validation failed"
+
 
 @bp.route('/login')
 def login():
     """Initiate Google OAuth login flow"""
     try:
-        flow = _google_flow()
+        flow = _create_google_flow()
         if not flow:
-            return jsonify({"error": "Google authentication is not configured"}), 500
-            
+            return jsonify({
+                "error": "Authentication service unavailable",
+                "message": "Google OAuth is not properly configured"
+            }), 503
+        
+        # Store the 'next' URL for post-login redirect
+        next_url = request.args.get('next')
+        if next_url:
+            session['next_url'] = next_url
+        
+        # Clear any existing session data
+        session.pop('google_id', None)
+        session.pop('oauth_state', None)
+        session.pop('oauth_start_time', None)
+        
+        # Generate and store OAuth state for CSRF protection
+        state = secrets.token_urlsafe(32)
+        session['oauth_state'] = state
+        session['oauth_start_time'] = time.time()
+        
+        # Store user agent for session validation
+        session['user_agent'] = request.headers.get('User-Agent', '')
+        
+        # Generate authorization URL
+        auth_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            state=state,
+            prompt='select_account'  # Always show account selection
+        )
+        
+        logger.info(f"🔐 Initiating OAuth flow for new user")
+        return redirect(auth_url)
+        
     except Exception as e:
-        logger.error(f"Login initialization error: {e}")
-        return jsonify({"error": "Authentication service unavailable"}), 500
-    
-    # Store the 'next' URL parameter for redirect after login
-    next_url = request.args.get('next')
-    if next_url:
-        session['next_url'] = next_url
-    
-    # Clear any existing session data before starting new auth flow
-    session.pop('google_id', None)
-    session.pop('oauth_state', None)
-    session.pop('oauth_start_time', None)
-    
-    # Generate and store OAuth state for security
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-    session['oauth_start_time'] = time.time()
-    
-    auth_url, _ = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        state=state,
-        prompt='select_account'
-    )
-    
-    logger.info(f"Redirecting user to OAuth URL: {auth_url[:100]}...")
-    return redirect(auth_url)
+        logger.error(f"Login initiation error: {e}")
+        return jsonify({
+            "error": "Authentication failed",
+            "message": "Unable to start authentication process"
+        }), 500
+
 
 @bp.route('/oauth2callback')
 def oauth2callback():
-    """Handle OAuth2 callback with enhanced error handling"""
+    """Handle OAuth2 callback with enhanced security and error handling"""
     try:
-        flow = _google_flow()
-        if not flow:
-            return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Authentication Error</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .error-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                          text-align: center; max-width: 500px; }
-        .error-icon { font-size: 48px; margin-bottom: 16px; }
-        .error-title { font-size: 24px; color: #1f2937; margin-bottom: 16px; }
-        .error-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .retry-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                    font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .retry-btn:hover { background: #0056D2; }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <div class="error-icon">🔒</div>
-        <h1 class="error-title">Authentication Configuration Error</h1>
-        <p class="error-message">
-            The authentication system is not properly configured. This could indicate a server issue.
-        </p>
-        <a href="/" class="retry-btn">← Return to Home</a>
-    </div>
-</body>
-</html>
-            """), 500
+        # Validate OAuth state parameter
+        state = request.args.get('state')
+        session_state = session.get('oauth_state')
         
-        # Validate OAuth state
-        received_state = request.args.get('state')
-        stored_state = session.pop('oauth_state', None)
+        if not state or not session_state or state != session_state:
+            logger.warning("OAuth state mismatch - possible CSRF attack")
+            return jsonify({
+                "error": "Authentication failed",
+                "message": "Invalid authentication state"
+            }), 400
         
-        if not received_state or received_state != stored_state:
-            logger.error("OAuth state validation failed")
-            return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Security Error</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .error-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                          text-align: center; max-width: 500px; }
-        .error-icon { font-size: 48px; margin-bottom: 16px; }
-        .error-title { font-size: 24px; color: #dc2626; margin-bottom: 16px; }
-        .error-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .retry-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                    font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .retry-btn:hover { background: #0056D2; }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <div class="error-icon">⚠️</div>
-        <h1 class="error-title">Security Verification Failed</h1>
-        <p class="error-message">
-            Authentication state validation failed. This could indicate a security issue.
-            <br><br>
-            Please try logging in again.
-        </p>
-        <a href="/login" class="retry-btn">← Try Again</a>
-    </div>
-</body>
-</html>
-            """), 400
-        
-        # Check OAuth session timeout (10 minutes)
-        oauth_start_time = session.pop('oauth_start_time', None)
-        if oauth_start_time and (time.time() - oauth_start_time) > 600:
-            logger.error("OAuth session timeout")
-            return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Session Timeout</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .error-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                          text-align: center; max-width: 500px; }
-        .error-icon { font-size: 48px; margin-bottom: 16px; }
-        .error-title { font-size: 24px; color: #f59e0b; margin-bottom: 16px; }
-        .error-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .retry-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                    font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .retry-btn:hover { background: #0056D2; }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <div class="error-icon">⏱️</div>
-        <h1 class="error-title">Session Expired</h1>
-        <p class="error-message">
-            The authentication session has expired. Please try again.
-        </p>
-        <a href="/login" class="retry-btn">← Login Again</a>
-    </div>
-</body>
-</html>
-            """), 408
+        # Check OAuth flow timeout (15 minutes max)
+        oauth_start_time = session.get('oauth_start_time', 0)
+        if time.time() - oauth_start_time > 900:  # 15 minutes
+            logger.warning("OAuth flow expired")
+            return jsonify({
+                "error": "Authentication timeout",
+                "message": "Authentication process took too long"
+            }), 400
         
         # Handle OAuth errors
         error = request.args.get('error')
         if error:
-            logger.error(f"OAuth error: {error}")
-            error_description = request.args.get('error_description', 'Authentication failed')
-            return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Authentication Error</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .error-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                          text-align: center; max-width: 500px; }
-        .error-icon { font-size: 48px; margin-bottom: 16px; }
-        .error-title { font-size: 24px; color: #dc2626; margin-bottom: 16px; }
-        .error-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .retry-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                    font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .retry-btn:hover { background: #0056D2; }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <div class="error-icon">❌</div>
-        <h1 class="error-title">Authentication Failed</h1>
-        <p class="error-message">
-            {{ error_description }}
-            <br><br>
-            Please try logging in again or contact support.
-        </p>
-        <a href="/login" class="retry-btn">← Try Again</a>
-    </div>
-</body>
-</html>
-            """, error_description=error_description), 400
+            logger.warning(f"OAuth error: {error}")
+            error_description = request.args.get('error_description', 'Unknown error')
+            return jsonify({
+                "error": "Authentication failed",
+                "message": f"OAuth error: {error_description}"
+            }), 400
+        
+        # Create OAuth flow
+        flow = _create_google_flow()
+        if not flow:
+            return jsonify({
+                "error": "Authentication service unavailable"
+            }), 503
         
         # Exchange authorization code for tokens
-        flow.fetch_token(authorization_response=request.url)
+        authorization_code = request.args.get('code')
+        if not authorization_code:
+            return jsonify({
+                "error": "Authentication failed",
+                "message": "No authorization code received"
+            }), 400
+        
+        try:
+            flow.fetch_token(authorization_response=request.url)
+        except Exception as e:
+            logger.error(f"Token exchange failed: {e}")
+            return jsonify({
+                "error": "Authentication failed", 
+                "message": "Failed to exchange authorization code"
+            }), 400
         
         # Get user info from Google
         credentials = flow.credentials
         request_session = google_auth_requests.Request()
-        id_info = id_token.verify_oauth2_token(
-            credentials.id_token,
-            request_session,
-            current_app.config["GOOGLE_CLIENT_ID"]
-        )
         
-        # Store user information in session
+        try:
+            id_info = id_token.verify_oauth2_token(
+                credentials.id_token,
+                request_session,
+                current_app.config.get("GOOGLE_CLIENT_ID")
+            )
+        except Exception as e:
+            logger.error(f"Token verification failed: {e}")
+            return jsonify({
+                "error": "Authentication failed",
+                "message": "Failed to verify user identity"
+            }), 400
+        
+        # Extract user information
+        user_id = id_info.get('sub')
+        email = id_info.get('email')
+        name = id_info.get('name')
+        picture = id_info.get('picture')
+        
+        if not user_id or not email:
+            logger.error("Incomplete user information from Google")
+            return jsonify({
+                "error": "Authentication failed",
+                "message": "Incomplete user information"
+            }), 400
+        
+        # Create secure session
         session.permanent = True
-        session['google_id'] = id_info.get('sub')
-        session['name'] = id_info.get('name')
-        session['email'] = id_info.get('email')
-        session['picture'] = id_info.get('picture')
+        session['google_id'] = user_id
+        session['email'] = email
+        session['name'] = name
+        session['picture'] = picture
         session['login_time'] = time.time()
         
-        logger.info(f"User {id_info.get('email')} logged in successfully")
+        # Clear OAuth temporary data
+        session.pop('oauth_state', None)
+        session.pop('oauth_start_time', None)
         
-        # Redirect to next URL or home
+        logger.info(f"✅ User authenticated successfully: {email}")
+        
+        # Redirect to original destination or home
         next_url = session.pop('next_url', '/')
         
-        # Success page with redirect for better UX
-        return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Login Successful</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="2;url={{ next_url }}">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .success-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                           text-align: center; max-width: 500px; }
-        .success-icon { font-size: 48px; margin-bottom: 16px; }
-        .success-title { font-size: 24px; color: #059669; margin-bottom: 16px; }
-        .success-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .continue-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                       font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .continue-btn:hover { background: #0056D2; }
-        .spinner { border: 2px solid #e5e7eb; border-top: 2px solid #1B7EFE; border-radius: 50%; 
-                  width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-</head>
-<body>
-    <div class="success-container">
-        <div class="success-icon">✅</div>
-        <h1 class="success-title">Welcome to DSA Mentor!</h1>
-        <p class="success-message">
-            You have successfully signed in as <strong>{{ user_name }}</strong>.
-            <br><br>
-            Redirecting you to the application...
-        </p>
-        <div class="spinner"></div>
-        <br>
-        <a href="{{ next_url }}" class="continue-btn">Continue</a>
-    </div>
-</body>
-</html>
-        """, next_url=next_url, user_name=id_info.get('name', 'User'))
+        # Validate redirect URL to prevent open redirects
+        if next_url.startswith('http') and not next_url.startswith(request.host_url):
+            next_url = '/'
+        
+        return redirect(next_url)
         
     except Exception as e:
-        logger.exception(f"OAuth callback error: {e}")
-        return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Unexpected Error</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .error-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                          text-align: center; max-width: 500px; }
-        .error-icon { font-size: 48px; margin-bottom: 16px; }
-        .error-title { font-size: 24px; color: #dc2626; margin-bottom: 16px; }
-        .error-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .error-details { background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px; 
-                        font-size: 14px; color: #991b1b; margin-bottom: 24px; }
-        .retry-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                    font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; margin-right: 12px; }
-        .retry-btn:hover { background: #0056D2; }
-        .home-btn { background: #6b7280; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                   font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .home-btn:hover { background: #4b5563; }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <div class="error-icon">💥</div>
-        <h1 class="error-title">Unexpected Error</h1>
-        <p class="error-message">
-            There was an unexpected error during authentication.
-        </p>
-        <div class="error-details">
-            Error: {{ error_message }}
-        </div>
-        <p class="error-message">
-            Please try again or contact support if the issue persists.
-        </p>
-        <a href="/login" class="retry-btn">🔄 Try Login Again</a>
-        <a href="/" class="home-btn">🏠 Go Home</a>
-    </div>
-</body>
-</html>
-        """, error_message=str(e)), 500
-
-@bp.route('/logout')
-def logout():
-    """Enhanced logout endpoint with better UX"""
-    try:
-        user_email = session.get('email', 'anonymous')
-        
-        # Clear all session data
-        session.clear()
-        
-        logger.info(f"User logged out: {user_email}")
-        
-        # Redirect to home with logout success message
-        return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Logged Out</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="3;url=/">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-               margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .logout-container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
-                           text-align: center; max-width: 500px; }
-        .logout-icon { font-size: 48px; margin-bottom: 16px; }
-        .logout-title { font-size: 24px; color: #1f2937; margin-bottom: 16px; }
-        .logout-message { color: #6b7280; margin-bottom: 32px; line-height: 1.5; }
-        .home-btn { background: #1B7EFE; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
-                   font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .home-btn:hover { background: #0056D2; }
-    </style>
-</head>
-<body>
-    <div class="logout-container">
-        <div class="logout-icon">👋</div>
-        <h1 class="logout-title">Successfully Logged Out</h1>
-        <p class="logout-message">
-            You have been safely logged out of DSA Mentor.
-            <br><br>
-            Thank you for learning with us!
-            <br><br>
-            Redirecting you to the home page...
-        </p>
-        <a href="/" class="home-btn">← Return to Home</a>
-    </div>
-</body>
-</html>
-        """)
-        
-    except Exception as e:
-        logger.error(f"Logout error: {e}")
-        return redirect('/')
-
-# Session validation endpoint for frontend auth checks
-@bp.route('/auth-status')
-def auth_status():
-    """Check current authentication status - CRITICAL MISSING ENDPOINT"""
-    try:
-        is_valid, message = _is_session_valid()
-        
-        if is_valid and 'google_id' in session:
-            return jsonify({
-                "is_authenticated": True,
-                "user_id": session.get('google_id'),
-                "name": session.get('name'),
-                "email": session.get('email'),
-                "picture": session.get('picture')
-            })
-        else:
-            return jsonify({
-                "is_authenticated": False,
-                "reason": message if not is_valid else "No session"
-            })
-    except Exception as e:
-        logger.error(f"Auth status check error: {e}")
+        logger.error(f"OAuth callback error: {e}")
         return jsonify({
-            "is_authenticated": False, 
-            "error": str(e)
+            "error": "Authentication failed",
+            "message": "An unexpected error occurred during authentication"
         }), 500
+
 
 @bp.route('/logout', methods=['POST'])
 def logout():
-    """Logout endpoint - also missing"""
+    """Logout user and clear session"""
     try:
-        # Clear all session data
+        user_email = session.get('email', 'Unknown')
+        
+        # Clear session data
         session.clear()
-        logger.info("User logged out successfully")
-        return jsonify({"success": True, "message": "Logged out successfully"})
+        
+        logger.info(f"🔐 User logged out: {user_email}")
+        
+        return jsonify({
+            "message": "Logged out successfully"
+        })
+        
     except Exception as e:
         logger.error(f"Logout error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({
+            "error": "Logout failed",
+            "message": "An error occurred during logout"
+        }), 500
 
 
-
-@bp.route('/validate-session')
-def validate_session():
-    """Validate current session - used by frontend for auth checks"""
+@bp.route('/auth-status')
+def auth_status():
+    """Get current authentication status"""
     try:
-        is_valid, reason = _is_session_valid()
-        
-        response_data = {
-            'valid': is_valid,
-            'reason': reason
-        }
+        is_valid, message = _validate_session()
         
         if is_valid:
-            response_data.update({
-                'user_id': session.get('google_id'),
-                'name': session.get('name'),
-                'email': session.get('email'),
-                'picture': session.get('picture'),
-                'login_time': session.get('login_time')
+            return jsonify({
+                "is_authenticated": True,
+                "user_id": session.get('google_id'),
+                "email": session.get('email'),
+                "name": session.get('name'),
+                "picture": session.get('picture'),
+                "login_time": session.get('login_time')
             })
+        else:
+            # Clear invalid session
+            session.clear()
+            
+            return jsonify({
+                "is_authenticated": False,
+                "message": message
+            })
+            
+    except Exception as e:
+        logger.error(f"Auth status check error: {e}")
+        return jsonify({
+            "is_authenticated": False,
+            "error": "Unable to verify authentication status"
+        }), 500
+
+
+@bp.route('/user-info')
+def user_info():
+    """Get detailed user information (requires authentication)"""
+    try:
+        is_valid, message = _validate_session()
         
-        return jsonify(response_data)
+        if not is_valid:
+            return jsonify({
+                "error": "Authentication required",
+                "message": message
+            }), 401
+        
+        return jsonify({
+            "user_id": session.get('google_id'),
+            "email": session.get('email'), 
+            "name": session.get('name'),
+            "picture": session.get('picture'),
+            "login_time": session.get('login_time'),
+            "session_age": time.time() - session.get('login_time', 0)
+        })
         
     except Exception as e:
-        logger.error(f"Session validation error: {e}")
+        logger.error(f"User info error: {e}")
         return jsonify({
-            'valid': False,
-            'reason': 'Validation failed',
-            'error': str(e)
+            "error": "Unable to retrieve user information"
         }), 500
+
+
+# Rate limiting decorator for sensitive endpoints
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from ..extensions import limiter
+
+# Apply rate limiting to authentication endpoints
+login.decorators.append(limiter.limit("10 per minute"))
+oauth2callback.decorators.append(limiter.limit("10 per minute"))
+logout.decorators.append(limiter.limit("20 per minute"))
