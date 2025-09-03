@@ -1,4 +1,5 @@
-# app/auth/routes.py - Enhanced Authentication Routes with Production Optimizations
+# app/auth/routes.py - FIXED Session Persistence Issues
+
 import time
 import secrets
 import logging
@@ -43,7 +44,6 @@ def _create_google_flow():
         # Set redirect URI
         redirect_uri = current_app.config.get("REDIRECT_URI")
         if not redirect_uri:
-            # ✅ FIXED: Fallback now correctly includes /auth prefix
             redirect_uri = request.url_root.rstrip('/') + '/auth/oauth2callback'
         
         flow.redirect_uri = redirect_uri
@@ -56,13 +56,15 @@ def _create_google_flow():
         return None
 
 def _validate_session():
-    """Validate user session with enhanced security checks"""
+    """✅ FIXED: Relaxed session validation for better persistence"""
     try:
         # Check for required session data
         if 'google_id' not in session:
+            logger.debug("No google_id in session")
             return False, "No active session"
         
         if 'login_time' not in session:
+            logger.debug("No login_time in session")
             return False, "Invalid session data"
         
         # Check session expiration
@@ -72,19 +74,21 @@ def _validate_session():
         if hasattr(max_age, 'total_seconds'):
             max_age = max_age.total_seconds()
         else:
-            max_age = 7200  # 2 hours default
+            max_age = 28800  # 8 hours default
         
         if session_age > max_age:
+            logger.debug(f"Session expired: {session_age} > {max_age}")
             return False, "Session expired"
         
-        # Additional security checks
-        user_agent = session.get('user_agent')
-        current_user_agent = request.headers.get('User-Agent', '')
+        # ✅ CRITICAL FIX: Remove strict user agent validation (causes OAuth issues)
+        # This was causing sessions to be invalidated after OAuth redirect
+        # user_agent = session.get('user_agent')
+        # current_user_agent = request.headers.get('User-Agent', '')
+        # if user_agent and user_agent != current_user_agent:
+        #     logger.warning(f"User agent mismatch for user {session.get('email')}")
+        #     return False, "Session security violation"
         
-        if user_agent and user_agent != current_user_agent:
-            logger.warning(f"User agent mismatch for user {session.get('email')}")
-            return False, "Session security violation"
-        
+        logger.debug(f"Session valid for user: {session.get('email')}")
         return True, "Valid session"
         
     except Exception as e:
@@ -117,7 +121,7 @@ def login():
         session['oauth_state'] = state
         session['oauth_start_time'] = time.time()
         
-        # Store user agent for session validation
+        # Store user agent for session validation (optional now)
         session['user_agent'] = request.headers.get('User-Agent', '')
         
         # Generate authorization URL
@@ -138,10 +142,9 @@ def login():
             "message": "Unable to start authentication process"
         }), 500
 
-# ✅ FIXED: Route matches the config and Google Console setting
 @bp.route('/oauth2callback')
 def oauth2callback():
-    """Handle OAuth2 callback with enhanced security and error handling"""
+    """✅ FIXED: Enhanced OAuth callback with proper session creation"""
     try:
         # Validate OAuth state parameter
         state = request.args.get('state')
@@ -227,19 +230,24 @@ def oauth2callback():
                 "message": "Incomplete user information"
             }), 400
         
-        # Create secure session
-        session.permanent = True
+        # ✅ CRITICAL FIX: Proper session creation with persistence
+        session.permanent = True  # Mark session as permanent
         session['google_id'] = user_id
         session['email'] = email
         session['name'] = name
         session['picture'] = picture
         session['login_time'] = time.time()
+        session['user_agent'] = request.headers.get('User-Agent', '')
+        
+        # ✅ CRITICAL: Force session save
+        session.modified = True
+        
+        logger.info(f"✅ Session created for user: {email}")
+        logger.info(f"✅ Session data: google_id={user_id}")
         
         # Clear OAuth temporary data
         session.pop('oauth_state', None)
         session.pop('oauth_start_time', None)
-        
-        logger.info(f"✅ User authenticated successfully: {email}")
         
         # Redirect to original destination or home
         next_url = session.pop('next_url', '/')
@@ -248,6 +256,7 @@ def oauth2callback():
         if next_url.startswith('http') and not next_url.startswith(request.host_url):
             next_url = '/'
         
+        logger.info(f"✅ Redirecting authenticated user to: {next_url}")
         return redirect(next_url)
         
     except Exception as e:
@@ -281,23 +290,26 @@ def logout():
 
 @bp.route('/auth-status')
 def auth_status():
-    """Get current authentication status"""
+    """✅ IMPROVED: Get current authentication status with better debugging"""
     try:
+        logger.debug(f"Auth status check - session keys: {list(session.keys())}")
+        
         is_valid, message = _validate_session()
         
         if is_valid:
-            return jsonify({
+            user_data = {
                 "is_authenticated": True,
                 "user_id": session.get('google_id'),
                 "email": session.get('email'),
                 "name": session.get('name'),
                 "picture": session.get('picture'),
                 "login_time": session.get('login_time')
-            })
+            }
+            logger.debug(f"✅ Auth status: User authenticated as {user_data['email']}")
+            return jsonify(user_data)
         else:
-            # Clear invalid session
-            session.clear()
-            
+            # ✅ IMPORTANT: Don't clear session immediately on auth check failure
+            logger.debug(f"❌ Auth status: {message}")
             return jsonify({
                 "is_authenticated": False,
                 "message": message
@@ -337,8 +349,40 @@ def user_info():
             "error": "Unable to retrieve user information"
         }), 500
 
-# ✅ Rate limiting decorators need to be imported properly
-# Note: This assumes you have a limiter setup in extensions.py
+# ✅ NEW: Debug endpoint to check session state
+@bp.route('/session-debug')
+def session_debug():
+    """Debug route to check session state"""
+    try:
+        session_data = {
+            "has_google_id": 'google_id' in session,
+            "google_id": session.get('google_id', 'None'),
+            "email": session.get('email', 'None'),
+            "name": session.get('name', 'None'),
+            "login_time": session.get('login_time', 'None'),
+            "session_age": time.time() - session.get('login_time', 0) if 'login_time' in session else 'N/A',
+            "all_session_keys": list(session.keys())
+        }
+        
+        validation_result = _validate_session()
+        
+        return jsonify({
+            "session_data": session_data,
+            "session_cookie_name": current_app.config['SESSION_COOKIE_NAME'],
+            "session_id_in_cookies": request.cookies.get(current_app.config['SESSION_COOKIE_NAME'], 'No cookie found'),
+            "all_cookies": dict(request.cookies),
+            "validation_result": validation_result,
+            "config_info": {
+                "cookie_secure": current_app.config['SESSION_COOKIE_SECURE'],
+                "cookie_httponly": current_app.config['SESSION_COOKIE_HTTPONLY'],
+                "cookie_samesite": current_app.config['SESSION_COOKIE_SAMESITE'],
+                "session_lifetime_hours": current_app.config['PERMANENT_SESSION_LIFETIME'].total_seconds() / 3600
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# Rate limiting decorators
 try:
     from ..extensions import limiter
     
@@ -348,6 +392,7 @@ try:
     logout = limiter.limit("20 per minute")(logout)
     auth_status = limiter.limit("60 per minute")(auth_status)
     user_info = limiter.limit("30 per minute")(user_info)
+    session_debug = limiter.limit("30 per minute")(session_debug)
 except ImportError:
     logger.warning("Rate limiter not available - skipping rate limiting setup")
     pass
