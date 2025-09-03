@@ -296,6 +296,100 @@ def process_dsa_query(query_text, thread_id):
             'summary': 'Please try your question again.'
         }
 
+
+@bp.route('/chat', methods=['POST'])
+def chat():
+    """Handle chat messages - CRITICAL MISSING ENDPOINT"""
+    try:
+        # Check authentication first
+        if 'google_id' not in session:
+            return jsonify({
+                "error": "Authentication required",
+                "requires_auth": True
+            }), 401
+        
+        # Get and validate request data
+        data = request.get_json()
+        is_valid, error_msg = validate_and_sanitize_query(data)
+        
+        if not is_valid:
+            return jsonify({"error": error_msg}), 400
+        
+        query = data.get("query", "").strip()
+        logger.info(f"Processing chat query: {query[:50]}...")
+        
+        # Process the query using your existing logic
+        try:
+            # Classify query intent
+            classification = classify_query_with_groq(query)
+            logger.info(f"Query classified as: {classification.get('type')}")
+            
+            # Generate response based on intent
+            intent_response = generate_response_by_intent(classification, query)
+            
+            if intent_response:
+                # Return intent-based response (greetings, etc.)
+                return jsonify({
+                    "response": intent_response.get("summary", ""),
+                    "best_book": intent_response.get("best_book", {}),
+                    "top_dsa": intent_response.get("top_dsa", []),
+                    "video_suggestions": intent_response.get("video_suggestions", []),
+                    "classification": classification
+                })
+            
+            # For DSA-specific queries, fetch relevant content
+            text_df = fetch_text_df()
+            qa_df = fetch_qa_df()
+            
+            best_text = best_text_for_query(query, text_df)
+            top_qa = top_qa_for_query(query, qa_df, k=3)
+            videos = get_videos(query, limit=3)
+            
+            # Prepare response
+            response_data = {
+                "response": "Here's what I found about your question:",
+                "best_book": {
+                    "title": "DSA Information",
+                    "content": best_text.get("content", "No specific content found.") if not best_text.get("error") else "No content available."
+                },
+                "top_dsa": top_qa[:3],
+                "video_suggestions": videos,
+                "classification": classification
+            }
+            
+            # Add summary if content found
+            if not best_text.get("error"):
+                processor = QueryProcessor()
+                ctx = processor.extract_dsa_context(query)
+                summary = enhanced_summarize_with_context(
+                    best_text.get("content", ""), ctx, query
+                )
+                if summary:
+                    response_data["response"] = summary
+            
+            return jsonify(response_data)
+            
+        except Exception as processing_error:
+            logger.error(f"Query processing error: {processing_error}")
+            return jsonify({
+                "response": "I encountered an error processing your question. Please try asking in a different way.",
+                "error": "processing_failed",
+                "best_book": {
+                    "title": "Error",
+                    "content": "Sorry, I couldn't process your request at the moment."
+                },
+                "top_dsa": [],
+                "video_suggestions": []
+            })
+        
+    except Exception as e:
+        logger.error(f"Chat endpoint error: {e}")
+        return jsonify({
+            "error": "Internal server error",
+            "message": "Please try again later"
+        }), 500
+
+
 @bp.route('/chat/<thread_id>')
 def shared_chat(thread_id):
     """Handle shared chat links - supports public viewing"""
